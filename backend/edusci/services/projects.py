@@ -197,7 +197,10 @@ def _researchability(idea: str) -> int:
 
 
 def run_gate(
-    session: Session, project: Project, task: TaskRecord | None = None
+    session: Session,
+    project: Project,
+    task: TaskRecord | None = None,
+    has_usable_dataset: bool | None = None,
 ) -> TaskRecord:
     def gate() -> None:
         if project.stage != FlowStage.EVIDENCE.value:
@@ -211,7 +214,10 @@ def run_gate(
             "information_sufficiency": scores.information_sufficiency,
             "researchability": scores.researchability,
         }
-        project.suggested_route = determine_route(scores).value
+        suggested_route = determine_route(scores).value
+        if has_usable_dataset is False and suggested_route == "A":
+            suggested_route = "B"
+        project.suggested_route = suggested_route
         project.stage = transition_stage(FlowStage(project.stage), FlowStage.GATE).value
 
     return _task(session, project, "gate", gate, task)
