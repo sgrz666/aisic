@@ -21,7 +21,10 @@ from edusci.memory.models import (
     TaskRecord,
 )
 from edusci.services.autonomy import create_autonomous_run, require_autonomous_run
+from edusci.services.analysis import promote_public_dataset, run_analysis
 from edusci.services.projects import run_evidence_build, run_gate, run_idea_parse
+from edusci.services.reporting import run_report, run_review
+from edusci.services.study import run_study_design
 
 
 class AutonomousOrchestrator:
@@ -53,9 +56,151 @@ class AutonomousOrchestrator:
             return self._cancel(run)
         if run.status == "awaiting_route_confirmation" and not project.route:
             return run
+        if project.route and project.stage == "S3_DESIGN":
+            return self._run_after_route(run, project)
         if project.stage == "S2_GATE":
             return self._run_to_gate(run, project)
         return run
+
+    def resume_after_real_data(
+        self, run_id: str, dataset_id: str
+    ) -> AutonomousRunRecord:
+        run = require_autonomous_run(self.session, run_id)
+        project = self.session.get(Project, run.project_id)
+        if project is None:
+            raise RuntimeError("自治研究关联的项目不存在")
+        if run.status != "awaiting_real_data" or project.stage != "S4_ANALYSIS":
+            raise ValueError("当前自治研究不在真实数据恢复阶段")
+        return self._analyze_report_review(run, project, dataset_id, "uploaded")
+
+    def _run_after_route(
+        self, run: AutonomousRunRecord, project: Project
+    ) -> AutonomousRunRecord:
+        checkpoints = CheckpointStore(self.session, run)
+        try:
+            self._check_canceled(run)
+            run.status = "designing_study"
+            self.session.commit()
+            checkpoints.run_node(
+                "study_design",
+                {
+                    "project_id": project.id,
+                    "route": project.route,
+                    "research_problem": project.research_problem,
+                },
+                lambda: self._study_design(project),
+                progress=90,
+                message="生成与确认路径一致的研究设计",
+            )
+
+            if project.route == "B":
+                run.status = "awaiting_real_data"
+                run.current_node = "real_data_gate"
+                run.pause_reason = {
+                    "kind": "real_data_required",
+                    "message": "问卷已生成，请上传真实回收数据后继续",
+                }
+                self.session.add(run)
+                self.session.commit()
+                return run
+
+            if project.route == "A":
+                asset = self.session.scalar(
+                    select(DatasetAssetRecord).where(
+                        DatasetAssetRecord.run_id == run.id
+                    )
+                )
+                if asset is None:
+                    raise ValueError("路径 A 缺少已验证的公开数据资产")
+                dataset_output = checkpoints.run_node(
+                    "prepare_public_dataset",
+                    {"asset_id": asset.id, "content_hash": asset.content_hash},
+                    lambda: self._promote_dataset(project, asset),
+                    progress=92,
+                    message="将已验证公开数据接入受控分析引擎",
+                ).output
+                return self._analyze_report_review(
+                    run, project, dataset_output["dataset_id"], "official"
+                )
+
+            return self._report_review(run, project)
+        except _Canceled:
+            return self._cancel(run)
+        except Exception as exc:
+            self._fail(run, exc)
+            raise
+
+    def _analyze_report_review(
+        self,
+        run: AutonomousRunRecord,
+        project: Project,
+        dataset_id: str,
+        dataset_origin: str,
+    ) -> AutonomousRunRecord:
+        checkpoints = CheckpointStore(self.session, run)
+        try:
+            self._check_canceled(run)
+            run.status = "analyzing"
+            self.session.commit()
+            checkpoints.run_node(
+                "analysis",
+                {"dataset_id": dataset_id, "origin": dataset_origin},
+                lambda: self._analysis(project, dataset_id),
+                progress=94,
+                message="使用白名单统计函数分析真实数据",
+            )
+            return self._report_review(run, project)
+        except _Canceled:
+            return self._cancel(run)
+        except Exception as exc:
+            self._fail(run, exc)
+            raise
+
+    def _report_review(
+        self, run: AutonomousRunRecord, project: Project
+    ) -> AutonomousRunRecord:
+        checkpoints = CheckpointStore(self.session, run)
+        try:
+            self._check_canceled(run)
+            run.status = "generating_report"
+            self.session.commit()
+            checkpoints.run_node(
+                "report",
+                {
+                    "route": project.route,
+                    "study_design": project.study_design,
+                    "analysis_result": project.analysis_result,
+                },
+                lambda: self._report(project),
+                progress=97,
+                message="生成带引用来源链的研究报告",
+            )
+            self._check_canceled(run)
+            run.status = "reviewing"
+            self.session.commit()
+            checkpoints.run_node(
+                "review",
+                {"route": project.route, "report": project.report},
+                lambda: self._review(project),
+                progress=100,
+                message="执行引用、统计、逻辑与伦理复审",
+            )
+            run.status = "completed"
+            run.current_node = "completed"
+            run.pause_reason = {}
+            if run.task_id:
+                task = self.session.get(TaskRecord, run.task_id)
+                if task:
+                    task.status = "completed"
+                    task.resource_id = project.id
+            self.session.add(run)
+            self.session.commit()
+            return run
+        except _Canceled:
+            return self._cancel(run)
+        except Exception as exc:
+            self._fail(run, exc)
+            raise
 
     def _run_to_gate(
         self, run: AutonomousRunRecord, project: Project
@@ -278,6 +423,39 @@ class AutonomousOrchestrator:
             "stage": project.stage,
         }
 
+    def _study_design(self, project: Project) -> dict:
+        run_study_design(self.session, project)
+        return {"study_design": project.study_design, "stage": project.stage}
+
+    def _promote_dataset(
+        self, project: Project, asset: DatasetAssetRecord
+    ) -> dict:
+        dataset = promote_public_dataset(self.session, project, asset)
+        return {"dataset_id": dataset.id}
+
+    def _analysis(self, project: Project, dataset_id: str) -> dict:
+        run_analysis(
+            self.session,
+            self.store,
+            project,
+            dataset_id,
+            outcome_column=None,
+            group_column=None,
+        )
+        return {"analysis_result": project.analysis_result, "stage": project.stage}
+
+    def _report(self, project: Project) -> dict:
+        run_report(self.session, project)
+        return {"report": project.report, "stage": project.stage}
+
+    def _review(self, project: Project) -> dict:
+        run_review(
+            self.session,
+            project,
+            model_provider=self.planner.model_provider,
+        )
+        return {"review": project.review, "stage": project.stage}
+
     @staticmethod
     def _check_canceled(run: AutonomousRunRecord) -> None:
         if run.cancel_requested:
@@ -292,6 +470,24 @@ class AutonomousOrchestrator:
         self.session.add(run)
         self.session.commit()
         return run
+
+    def _fail(self, run: AutonomousRunRecord, exc: Exception) -> None:
+        self.session.rollback()
+        run = require_autonomous_run(self.session, run.id)
+        run.status = "failed"
+        run.error = {
+            "type": exc.__class__.__name__,
+            "message": str(exc),
+            "node": run.current_node,
+        }
+        if run.task_id:
+            task = self.session.get(TaskRecord, run.task_id)
+            if task:
+                task.status = "failed"
+                task.retryable = True
+                task.error = run.error
+        self.session.add(run)
+        self.session.commit()
 
 
 class _Canceled(Exception):

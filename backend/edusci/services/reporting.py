@@ -80,7 +80,7 @@ def run_review(
             "message": "真实数据结果已记录" if result_kind == "observed" else "未生成伪统计结论",
         }
         logic = {
-            "status": "WARN" if project.route == "D" else "PASS",
+            "status": "BLOCK" if project.route == "D" else "PASS",
             "message": "探索性路径仅保留假设" if project.route == "D" else "结论边界与路径一致",
         }
         ethics = {"status": "PASS", "message": "已包含隐私、知情同意和样本限制"}

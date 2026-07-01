@@ -3,12 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from edusci.analysis.engine import analyze_dataframe, profile_dataframe
 from edusci.analysis.storage import LocalObjectStore
 from edusci.domain.flow import FlowStage, transition_stage
-from edusci.memory.models import DatasetRecord, Project, TaskRecord
+from edusci.memory.models import DatasetAssetRecord, DatasetRecord, Project, TaskRecord
 from edusci.services.projects import _task
 
 
@@ -43,6 +44,35 @@ def save_dataset(
     if project.stage == FlowStage.WAITING_FOR_DATA.value:
         project.stage = transition_stage(FlowStage(project.stage), FlowStage.ANALYSIS).value
     session.add(project)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
+def promote_public_dataset(
+    session: Session, project: Project, asset: DatasetAssetRecord
+) -> DatasetRecord:
+    """Expose a validated autonomous asset to the controlled analysis service."""
+    existing = session.scalar(
+        select(DatasetRecord).where(
+            DatasetRecord.project_id == project.id,
+            DatasetRecord.storage_path == asset.storage_path,
+        )
+    )
+    if existing is not None:
+        return existing
+    columns = list(asset.schema_json)
+    record = DatasetRecord(
+        project_id=project.id,
+        file_name=f"public-{asset.id}.csv",
+        content_type="text/csv",
+        storage_path=asset.storage_path,
+        row_count=asset.row_count,
+        column_count=asset.column_count,
+        data_schema={"columns": columns, "types": asset.schema_json},
+        quality_report=asset.quality_report,
+    )
+    session.add(record)
     session.commit()
     session.refresh(record)
     return record
