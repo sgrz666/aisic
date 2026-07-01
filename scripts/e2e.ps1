@@ -7,8 +7,8 @@ function Assert-CommandSucceeded([string]$Name) {
 
 Push-Location (Join-Path $Root "backend")
 try {
-  & ".\.venv\Scripts\python.exe" -m pytest tests\test_e2e_routes.py -q
-  Assert-CommandSucceeded "Four-route E2E"
+  & ".\.venv\Scripts\python.exe" -m pytest tests\test_e2e_routes.py tests\test_autonomy_e2e.py -q
+  Assert-CommandSucceeded "Four-route and autonomous E2E"
 } finally { Pop-Location }
 
 Push-Location (Join-Path $Root "frontend")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import time
 
@@ -86,6 +87,20 @@ class SemanticScholarLiteratureAdapter(_LiteratureHttpAdapter):
         "paperId,title,url,abstract,year,authors,externalIds,citationCount,"
         "fieldsOfStudy,publicationDate"
     )
+
+    def __init__(
+        self,
+        client: httpx.Client | None = None,
+        max_retries: int = 3,
+        api_key: str | None = None,
+    ) -> None:
+        resolved_key = api_key or os.getenv("SEMANTIC_SCHOLAR_API_KEY", "").strip()
+        if client is None and resolved_key:
+            client = httpx.Client(
+                timeout=20,
+                headers={"User-Agent": "EduSci-MVP/0.2", "x-api-key": resolved_key},
+            )
+        super().__init__(client, max_retries)
 
     def search(self, query: str, limit: int) -> list[dict]:
         data = self._get_json(

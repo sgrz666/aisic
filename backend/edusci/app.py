@@ -63,6 +63,16 @@ def create_app(
             redis = Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
             app.state.task_queue = Queue("edusci", connection=redis)
         app.state.model_provider = resolved_provider
+        app.state.autonomous_enabled = (
+            os.getenv("AUTONOMOUS_RESEARCH_ENABLED", "true").lower() == "true"
+        )
+        app.state.autonomous_max_literature_rounds = int(
+            os.getenv("AUTONOMOUS_MAX_LITERATURE_ROUNDS", "3")
+        )
+        app.state.autonomous_max_results_per_query = int(
+            os.getenv("AUTONOMOUS_MAX_RESULTS_PER_QUERY", "10")
+        )
+        download_limit = int(os.getenv("AUTONOMOUS_DOWNLOAD_LIMIT_MB", "50"))
         shared_client = None
         if literature_adapters is None or dataset_adapters is None:
             shared_client = httpx.Client(
@@ -70,13 +80,25 @@ def create_app(
                 follow_redirects=True,
                 headers={"User-Agent": "EduSci-MVP/0.2"},
             )
-        app.state.literature_adapters = literature_adapters or [
-            CrossrefLiteratureAdapter(shared_client),
-            SemanticScholarLiteratureAdapter(shared_client),
-        ]
+        semantic_key = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "").strip()
+        semantic_adapter = None
+        if literature_adapters is None:
+            semantic_adapter = SemanticScholarLiteratureAdapter(
+                None if semantic_key else shared_client,
+                api_key=semantic_key or None,
+            )
+            app.state.literature_adapters = [
+                CrossrefLiteratureAdapter(shared_client),
+                semantic_adapter,
+            ]
+        else:
+            app.state.literature_adapters = literature_adapters
         app.state.dataset_adapters = dataset_adapters or default_dataset_adapters(
             shared_client
         )
+        for adapter in app.state.dataset_adapters:
+            if hasattr(adapter, "max_size_bytes"):
+                adapter.max_size_bytes = download_limit * 1024 * 1024
         app.state.retriever = (
             OpenResearchRetriever()
             if os.getenv("ENABLE_LIVE_RETRIEVAL", "false").lower() == "true"
@@ -85,6 +107,8 @@ def create_app(
         yield
         if shared_client is not None:
             shared_client.close()
+        if semantic_adapter is not None and semantic_adapter.client is not shared_client:
+            semantic_adapter.client.close()
 
     app = FastAPI(
         title="教育智研 API",

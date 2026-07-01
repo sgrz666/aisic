@@ -19,7 +19,7 @@ from edusci.integrations.retrieval import (
     SemanticScholarLiteratureAdapter,
 )
 from edusci.memory.database import build_session_factory
-from edusci.memory.models import DatasetRecord, Project, TaskRecord
+from edusci.memory.models import AutonomousRunRecord, DatasetRecord, Project, TaskRecord
 from edusci.services.analysis import run_analysis
 from edusci.services.projects import run_evidence_build, run_gate, run_idea_parse
 from edusci.services.reporting import run_report, run_review
@@ -54,12 +54,35 @@ def execute_autonomous_run(
     session_factory = build_session_factory(database_url)
     with session_factory() as session:
         store = LocalObjectStore(Path(storage_root))
+        run = session.get(AutonomousRunRecord, run_id)
+        if run is None:
+            raise ValueError("自治研究任务不存在")
+        config = run.config or {}
+        dataset_adapters = default_dataset_adapters()
+        download_limit = int(os.getenv("AUTONOMOUS_DOWNLOAD_LIMIT_MB", "50"))
+        for adapter in dataset_adapters:
+            if hasattr(adapter, "max_size_bytes"):
+                adapter.max_size_bytes = download_limit * 1024 * 1024
         orchestrator = AutonomousOrchestrator(
             session=session,
             store=store,
             planner=ResearchPlanner(_provider()),
-            literature_scout=LiteratureScout(default_literature_adapters()),
-            data_scout=DataScout(default_dataset_adapters(), store),
+            literature_scout=LiteratureScout(
+                default_literature_adapters(),
+                max_rounds=int(
+                    config.get(
+                        "max_literature_rounds",
+                        os.getenv("AUTONOMOUS_MAX_LITERATURE_ROUNDS", "3"),
+                    )
+                ),
+                max_results_per_query=int(
+                    config.get(
+                        "max_results_per_query",
+                        os.getenv("AUTONOMOUS_MAX_RESULTS_PER_QUERY", "10"),
+                    )
+                ),
+            ),
+            data_scout=DataScout(dataset_adapters, store),
         )
         if action == "start":
             orchestrator.start_existing(run_id)

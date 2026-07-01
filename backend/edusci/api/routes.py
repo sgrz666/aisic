@@ -95,14 +95,29 @@ def submit_task(
 
 
 def autonomous_orchestrator(
-    request: Request, session: Session
+    request: Request, session: Session, config: dict | None = None
 ) -> AutonomousOrchestrator:
     store = request.app.state.object_store
+    resolved_config = config or {}
     return AutonomousOrchestrator(
         session=session,
         store=store,
         planner=ResearchPlanner(request.app.state.model_provider),
-        literature_scout=LiteratureScout(request.app.state.literature_adapters),
+        literature_scout=LiteratureScout(
+            request.app.state.literature_adapters,
+            max_rounds=int(
+                resolved_config.get(
+                    "max_literature_rounds",
+                    request.app.state.autonomous_max_literature_rounds,
+                )
+            ),
+            max_results_per_query=int(
+                resolved_config.get(
+                    "max_results_per_query",
+                    request.app.state.autonomous_max_results_per_query,
+                )
+            ),
+        ),
         data_scout=DataScout(request.app.state.dataset_adapters, store),
     )
 
@@ -134,6 +149,8 @@ def autonomous_run_start(
     session: Session = Depends(get_session),
 ) -> dict:
     project = require_project(session, project_id)
+    if not request.app.state.autonomous_enabled:
+        raise HTTPException(status_code=404, detail="自治研究功能未启用")
     config = payload.model_dump()
     if request.app.state.task_mode == "rq":
         run = create_autonomous_run(session, project, config, queued=True)
@@ -146,7 +163,7 @@ def autonomous_run_start(
             action="start",
         )
     else:
-        run = autonomous_orchestrator(request, session).start(project, config)
+        run = autonomous_orchestrator(request, session, config).start(project, config)
     return {"task_id": run.task_id, "run_id": run.id, "status": run.status}
 
 
@@ -198,7 +215,7 @@ def autonomous_run_cancel(
 ) -> dict:
     run = request_cancellation(session, require_autonomous_run(session, run_id))
     if request.app.state.task_mode != "rq":
-        run = autonomous_orchestrator(request, session).resume(run.id)
+        run = autonomous_orchestrator(request, session, run.config).resume(run.id)
     return {"task_id": run.task_id, "run_id": run.id, "status": run.status}
 
 
@@ -225,7 +242,7 @@ def autonomous_run_resume(
             action="resume",
         )
     else:
-        run = autonomous_orchestrator(request, session).resume(run.id)
+        run = autonomous_orchestrator(request, session, run.config).resume(run.id)
     return {"task_id": run.task_id, "run_id": run.id, "status": run.status}
 
 
@@ -389,7 +406,7 @@ async def dataset_upload(
                 dataset_id=dataset.id,
             )
         else:
-            autonomous_orchestrator(request, session).resume_after_real_data(
+            autonomous_orchestrator(request, session, active_run.config).resume_after_real_data(
                 active_run.id, dataset.id
             )
     return dataset

@@ -18,6 +18,7 @@
 - 长任务统一返回 `202 + TaskRef`，支持 RQ、任务查询、SSE、取消和节点重试。
 - EduSciEvolve Lite 只记录反馈与改进提案，不自动修改 Prompt、DAG 或安全规则。
 - React + TypeScript + Ant Design 科研工作台和四个比赛演示案例。
+- 一键自治研究：自动规划、多轮文献检索、官方数据发现、来源评分、检查点恢复，并只在路径、伦理/PII 和真实数据处暂停。
 
 ## 架构
 
@@ -111,6 +112,29 @@ ENABLE_LIVE_RETRIEVAL=true
 
 未配置 Key 时，系统使用确定性演示逻辑，完整流程仍可运行。开放检索关闭时，可在 S1 上传 PDF 建立证据。
 
+### 一键自治研究
+
+进入项目后点击“启动自动研究”。系统会按以下顺序运行：研究规划 → Crossref/Semantic Scholar 文献检索 → World Bank/UNICEF/UNESCO UIS/教育部数据检索 → 证据和许可校验 → 路径建议。
+
+- 到 A/B/C/D 路径门禁时必须由你确认。
+- A 使用通过许可、来源和 PII 检查的开放数据运行受控统计。
+- B 生成问卷后等待真实回收数据；上传 CSV/XLSX 后自动恢复。
+- C 只做理论证据综合，不生成统计结果。
+- D 只保留探索性方向，并阻断终稿。
+- 任务失败或取消后可从已完成检查点恢复，不会重复请求已经完成的检索节点。
+
+可选配置：
+
+```dotenv
+AUTONOMOUS_RESEARCH_ENABLED=true
+SEMANTIC_SCHOLAR_API_KEY=
+AUTONOMOUS_MAX_LITERATURE_ROUNDS=3
+AUTONOMOUS_MAX_RESULTS_PER_QUERY=10
+AUTONOMOUS_DOWNLOAD_LIMIT_MB=50
+```
+
+真实 `DASHSCOPE_API_KEY` 只能写入本地 `.env`，不要写入 `.env.example` 或提交到 Git。
+
 ## 测试
 
 Windows：
@@ -146,6 +170,7 @@ powershell -ExecutionPolicy Bypass -File scripts\demo-seed.ps1
 - 数据与分析：`/api/v1/projects/{id}/datasets`、`/analysis-runs`
 - 报告与复审：`/report-runs`、`/review-runs`、`/report.docx`
 - 任务：`/api/v1/tasks/{id}`、`/events`、`/cancel`、`/retry`
+- 自治研究：`/api/v1/projects/{id}/autonomous-runs`、`/api/v1/autonomous-runs/{id}`、`/events`、`/cancel`、`/resume`、`/dataset-candidates`
 - 反馈提案：`/api/v1/projects/{id}/feedback-signals`
 
 OpenAPI 是前后端唯一接口契约，运行后可在 `/docs` 直接试调。
@@ -156,4 +181,4 @@ OpenAPI 是前后端唯一接口契约，运行后可在 `/docs` 直接试调。
 - 问卷只生成和展示，不内置发放、回收与受试者管理。
 - 不执行模型生成代码，不允许自动修改 Prompt、DAG 或安全规则。
 - PostgreSQL 启动时会启用 `vector` 扩展，文档块和长期知识实体已落 1024 维向量字段；当前召回仍以关系表和内容哈希为主，Embedding 生成与向量排序可在第二阶段接入。
-- 本仓库当前不是 Git 工作树，因此本次实现未创建提交或分支。
+- 当前为比赛 MVP；生产部署前还需补充认证、配额、审计留存和密钥托管。
