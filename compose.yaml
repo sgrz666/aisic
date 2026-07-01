@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: edusci
+      POSTGRES_USER: edusci
+      POSTGRES_PASSWORD: edusci
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edusci"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://edusci:edusci@postgres:5432/edusci
+      STORAGE_ROOT: /app/storage
+      REDIS_URL: redis://redis:6379/0
+      TASK_MODE: rq
+    ports:
+      - "8000:8000"
+    volumes:
+      - upload_data:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    command: ["rq", "worker", "edusci", "--url", "redis://redis:6379/0"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://edusci:edusci@postgres:5432/edusci
+      STORAGE_ROOT: /app/storage
+      REDIS_URL: redis://redis:6379/0
+      TASK_MODE: rq
+    volumes:
+      - upload_data:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  upload_data:
+

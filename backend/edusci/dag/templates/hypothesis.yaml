@@ -1,0 +1,28 @@
+name: hypothesis
+artifact: StudyDesign
+nodes:
+  - name: generate_a
+    operator: generate
+    model_role: generation
+    quality_gate: hypothesis_is_falsifiable
+  - name: generate_b
+    operator: variation
+    model_role: generation
+    quality_gate: hypothesis_is_falsifiable
+  - name: debate
+    operator: debate
+    dependencies: [generate_a, generate_b]
+    model_role: review
+    quality_gate: evidence_and_counterevidence_present
+  - name: test
+    operator: researchability_test
+    dependencies: [debate]
+    model_role: review
+    tools: [researchability_rubric]
+    quality_gate: route_constraints_satisfied
+  - name: polish
+    operator: polish
+    dependencies: [test]
+    model_role: generation
+    quality_gate: study_design_schema_valid
+

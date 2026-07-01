@@ -1,0 +1,34 @@
+name: review
+artifact: ReviewRun
+nodes:
+  - name: citation
+    operator: citation_judge
+    model_role: review
+    tools: [citation_map]
+    quality_gate: citations_resolvable
+  - name: statistics
+    operator: statistics_judge
+    model_role: review
+    tools: [analysis_trace]
+    quality_gate: no_fabricated_result
+  - name: logic
+    operator: logic_judge
+    model_role: review
+    quality_gate: conclusion_matches_evidence
+  - name: ethics
+    operator: ethics_judge
+    model_role: review
+    tools: [pii_report]
+    quality_gate: ethics_notes_present
+  - name: aggregate
+    operator: review_ensemble
+    dependencies: [citation, statistics, logic, ethics]
+    model_role: review
+    quality_gate: blocking_risks_classified
+  - name: refine
+    operator: bounded_refine
+    dependencies: [aggregate]
+    model_role: generation
+    retry_limit: 2
+    quality_gate: revision_round_lte_two
+

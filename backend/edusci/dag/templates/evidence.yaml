@@ -1,0 +1,23 @@
+name: evidence
+artifact: EvidencePacket
+nodes:
+  - name: search
+    operator: parallel_search
+    tools: [uploaded_documents, crossref, semantic_scholar]
+    quality_gate: source_has_locator
+  - name: extract
+    operator: fact_extraction
+    dependencies: [search]
+    model_role: generation
+    quality_gate: claim_bound_to_source
+  - name: verify
+    operator: evidence_review
+    dependencies: [extract]
+    model_role: review
+    quality_gate: trust_status_not_block
+  - name: aggregate
+    operator: evidence_ensemble
+    dependencies: [verify]
+    model_role: review
+    quality_gate: packet_schema_valid
+
