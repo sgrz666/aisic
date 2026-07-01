@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from edusci.api.schemas import ProjectCreate, SourceInput
+from edusci.autonomy.contracts import ResearchPlan
 from edusci.domain.flow import FlowStage, ResearchScores, determine_route, transition_stage
 from edusci.memory.models import EvidenceCard, FlowEvent, Project, TaskRecord
 
@@ -83,9 +84,21 @@ def run_idea_parse(
     project: Project,
     model_provider=None,
     task: TaskRecord | None = None,
+    research_plan: ResearchPlan | None = None,
 ) -> TaskRecord:
     def parse() -> None:
-        if model_provider is not None:
+        if research_plan is not None:
+            project.research_problem = {
+                "problem_statement": research_plan.problem_statement,
+                "variables": [variable.name for variable in research_plan.variables],
+                "target_group": research_plan.population,
+                "discipline": "教育学",
+                "clarifying_questions": [],
+                "concepts": research_plan.concepts,
+                "geographies": research_plan.geographies,
+                "time_range": research_plan.time_range.model_dump(),
+            }
+        elif model_provider is not None:
             project.research_problem = model_provider.complete_json(
                 "generation",
                 [
