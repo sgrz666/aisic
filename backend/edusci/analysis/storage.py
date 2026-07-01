@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from uuid import uuid4
 
@@ -36,11 +37,29 @@ class LocalObjectStore:
         path.write_bytes(content)
         return path
 
+    def save_remote_dataset(
+        self, project_id: str, file_name: str, content: bytes
+    ) -> tuple[Path, str]:
+        """Store a downloaded public dataset under a generated, traversal-safe name."""
+        safe_name = Path(file_name).name
+        suffix = Path(safe_name).suffix.lower()
+        if suffix not in {".csv", ".json", ".xlsx"}:
+            raise ValueError("远程数据集仅支持 CSV、JSON 或 XLSX")
+        if len(content) > 50 * 1024 * 1024:
+            raise ValueError("单文件不得超过 50 MB")
+        directory = self.root / project_id / "public-datasets"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{uuid4().hex}{suffix}"
+        path.write_bytes(content)
+        return path, hashlib.sha256(content).hexdigest()
+
     @staticmethod
     def read_dataframe(path: str | Path) -> pd.DataFrame:
         target = Path(path)
         if target.suffix.lower() == ".xlsx":
             return pd.read_excel(target)
+        if target.suffix.lower() == ".json":
+            return pd.read_json(target)
         try:
             return pd.read_csv(target, encoding="utf-8-sig")
         except UnicodeDecodeError:
