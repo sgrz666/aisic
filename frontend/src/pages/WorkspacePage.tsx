@@ -12,6 +12,7 @@ import { Link, useParams } from 'react-router-dom'
 
 import {
   confirmRoute,
+  getAutonomousRun,
   getProject,
   listEvidence,
   runAnalysis,
@@ -21,16 +22,24 @@ import {
   runReport,
   runReview,
   runStudyDesign,
+  resumeAutonomousRun,
   uploadDataset,
   uploadDocument,
 } from '../api'
 import { BrandMark } from '../components/BrandMark'
+import { AutonomousRunPanel } from '../components/AutonomousRunPanel'
 import { EvidenceDrawer } from '../components/EvidenceDrawer'
 import { GatePanel } from '../components/GatePanel'
 import { QuestionnairePanel } from '../components/QuestionnairePanel'
 import { ReportPanel } from '../components/ReportPanel'
 import { StageRail } from '../components/StageRail'
-import type { EvidenceCard, Project, ResearchRoute, ResearchScores } from '../types'
+import type {
+  AutonomousRun,
+  EvidenceCard,
+  Project,
+  ResearchRoute,
+  ResearchScores,
+} from '../types'
 
 export function WorkspacePage() {
   const { projectId = '' } = useParams()
@@ -38,6 +47,7 @@ export function WorkspacePage() {
   const [evidence, setEvidence] = useState<EvidenceCard[]>([])
   const [drawer, setDrawer] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [autonomousRun, setAutonomousRun] = useState<AutonomousRun | null>(null)
   const [analysisColumns, setAnalysisColumns] = useState({ outcome: 'AI焦虑得分', group: '专业' })
 
   const refresh = useCallback(async () => {
@@ -50,6 +60,11 @@ export function WorkspacePage() {
   }, [projectId])
 
   useEffect(() => { refresh().catch((error) => message.error(error.message)) }, [refresh])
+
+  const handleAutonomousChanged = useCallback((latest: AutonomousRun) => {
+    setAutonomousRun(latest)
+    refresh().catch((error) => message.error(error.message))
+  }, [refresh])
 
   async function action(operation: () => Promise<unknown>) {
     setBusy(true)
@@ -72,6 +87,12 @@ export function WorkspacePage() {
 
   async function analyzeFile(file: File) {
     const dataset = await uploadDataset(project.id, file)
+    if (autonomousRun?.status === 'awaiting_real_data') {
+      const latest = await getAutonomousRun(autonomousRun.id)
+      setAutonomousRun(latest)
+      await refresh()
+      return false
+    }
     await runAnalysis(project.id, {
       dataset_id: dataset.id,
       outcome_column: analysisColumns.outcome,
@@ -79,6 +100,15 @@ export function WorkspacePage() {
     })
     await refresh()
     return false
+  }
+
+  async function confirmAndContinue(route: ResearchRoute) {
+    await confirmRoute(project.id, route)
+    if (autonomousRun?.status === 'awaiting_route_confirmation') {
+      await resumeAutonomousRun(autonomousRun.id)
+      const latest = await getAutonomousRun(autonomousRun.id)
+      setAutonomousRun(latest)
+    }
   }
 
   function dataUploadPanel(mode: 'collected' | 'existing') {
@@ -127,7 +157,7 @@ export function WorkspacePage() {
           </section>
         )
       case 'S2_GATE':
-        return <GatePanel scores={{ information_sufficiency: scores.information_sufficiency ?? 0, researchability: scores.researchability ?? 0 }} suggestedRoute={(project.suggested_route ?? 'D') as ResearchRoute} loading={busy} onConfirm={(route) => action(() => confirmRoute(project.id, route))} />
+        return <GatePanel scores={{ information_sufficiency: scores.information_sufficiency ?? 0, researchability: scores.researchability ?? 0 }} suggestedRoute={(project.suggested_route ?? 'D') as ResearchRoute} loading={busy} onConfirm={(route) => action(() => confirmAndContinue(route))} />
       case 'S3_DESIGN':
         return (
           <Result
@@ -170,7 +200,16 @@ export function WorkspacePage() {
       </header>
       <div className="workspace-grid">
         <StageRail currentStage={project.stage} />
-        <main className="workspace-main">{renderStage()}</main>
+        <main className="workspace-main">
+          <div className="stage-stack">
+            <AutonomousRunPanel
+              projectId={project.id}
+              run={autonomousRun}
+              onChanged={handleAutonomousChanged}
+            />
+            {renderStage()}
+          </div>
+        </main>
       </div>
       <EvidenceDrawer open={drawer} onClose={() => setDrawer(false)} evidence={evidence} />
     </div>

@@ -206,6 +206,76 @@ body::before {
 .ant-upload-wrapper .ant-upload-drag small { margin-top: 7px; color: var(--muted); }
 .evidence-count-card { display: grid; place-items: center; align-content: center; gap: 16px; border: 1px solid var(--line); }
 .stage-stack { display: grid; gap: 24px; }
+.autonomous-panel {
+  position: relative;
+  max-width: 1100px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 28px 32px;
+  border: 1px solid rgba(31,78,95,.22);
+  background: #f8f4e9;
+  box-shadow: 7px 8px 0 rgba(31,78,95,.08);
+}
+.autonomous-panel--idle {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: center;
+  background:
+    linear-gradient(110deg, rgba(255,253,247,.96) 0 68%, rgba(31,78,95,.08) 68%),
+    var(--white);
+}
+.autonomous-panel__seal {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  color: #d9ad5a;
+  background: var(--navy-dark);
+  border-radius: 50%;
+  font-size: 28px;
+  box-shadow: 4px 4px 0 rgba(185,77,50,.25);
+}
+.autonomous-panel h2 { margin: 5px 0 8px; font-size: 24px; }
+.autonomous-panel p { margin-bottom: 0; color: var(--muted); line-height: 1.7; }
+.autonomous-panel__topline, .dataset-candidates__heading, .dataset-candidate__source {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+.autonomous-panel__nodes {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  margin: 10px 0 18px;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-align: center;
+}
+.autonomous-panel__nodes span { position: relative; padding-top: 10px; border-top: 1px solid var(--line); }
+.autonomous-panel__nodes span::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--navy);
+}
+.autonomous-panel__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.dataset-candidates { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line); }
+.dataset-candidates__heading h3 { margin: 4px 0 0; font-size: 20px; }
+.dataset-candidates__heading > span { color: var(--muted); font-size: 11px; }
+.dataset-candidates__list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.dataset-candidate { padding: 18px; border: 1px solid var(--line); background: rgba(255,253,247,.78); }
+.dataset-candidate--selected { border-left: 4px solid #4b8e67; background: #f2f6ed; }
+.dataset-candidate h4 { margin: 15px 0 12px; font-size: 16px; }
+.dataset-candidate__metrics { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--muted); font-size: 11px; }
+.dataset-candidate__reason { margin-top: 10px; color: #a33f2d !important; font-size: 11px; }
+.dataset-candidate__mapping { margin: 10px 0; font-family: monospace; font-size: 11px; }
+.dataset-candidate a { display: inline-flex; gap: 6px; align-items: center; margin-top: 10px; color: var(--navy); font-size: 12px; font-weight: 700; }
 .data-upload-panel { display: grid; grid-template-columns: 1fr 360px; gap: 40px; align-items: center; }
 .report-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 28px; }
 .evidence-summary { display: flex; align-items: end; gap: 12px; padding: 18px; margin-bottom: 18px; color: white; background: var(--navy-dark); }
@@ -236,6 +306,9 @@ body::before {
   .score-grid { grid-template-columns: 1fr 1fr; }
   .route-card { grid-column: 1 / -1; }
   .data-upload-panel { grid-template-columns: 1fr; }
+  .autonomous-panel--idle { grid-template-columns: 64px 1fr; }
+  .autonomous-panel--idle > .ant-btn { grid-column: 1 / -1; }
+  .dataset-candidates__list { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 640px) {
@@ -258,6 +331,10 @@ body::before {
   .score-grid, .drop-grid { grid-template-columns: 1fr; }
   .route-card { grid-column: auto; }
   .gate-panel__header, .report-panel__top { flex-direction: column; }
+  .autonomous-panel { padding: 22px 18px; }
+  .autonomous-panel--idle { grid-template-columns: 1fr; }
+  .autonomous-panel__seal { width: 52px; height: 52px; }
+  .autonomous-panel__nodes { grid-template-columns: repeat(4, 1fr); row-gap: 14px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

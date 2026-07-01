@@ -1,4 +1,11 @@
-import type { EvidenceCard, Project, ResearchRoute } from './types'
+import type {
+  AutonomousRun,
+  AutonomousRunRef,
+  DatasetCandidate,
+  EvidenceCard,
+  Project,
+  ResearchRoute,
+} from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -89,3 +96,27 @@ export const runAnalysis = (
 
 export const reportDownloadUrl = (id: string, mode: 'draft' | 'final') =>
   `/api/v1/projects/${id}/report.docx?mode=${mode}`
+
+export const startAutonomousResearch = (projectId: string) =>
+  request<AutonomousRunRef>(`/api/v1/projects/${projectId}/autonomous-runs`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+
+export const getAutonomousRun = (runId: string) =>
+  request<AutonomousRun>(`/api/v1/autonomous-runs/${runId}`)
+
+export const cancelAutonomousRun = (runId: string) =>
+  request<AutonomousRunRef>(`/api/v1/autonomous-runs/${runId}/cancel`, {
+    method: 'POST',
+  })
+
+export const resumeAutonomousRun = (runId: string) =>
+  request<AutonomousRunRef>(`/api/v1/autonomous-runs/${runId}/resume`, {
+    method: 'POST',
+  })
+
+export const listDatasetCandidates = (runId: string) =>
+  request<DatasetCandidate[]>(
+    `/api/v1/autonomous-runs/${runId}/dataset-candidates`,
+  )

@@ -73,3 +73,69 @@ export interface EvidenceCard {
   trust_status: 'PASS' | 'WARN' | 'BLOCK'
   locked: boolean
 }
+
+export type AutonomousStatus =
+  | 'queued'
+  | 'planning'
+  | 'searching_literature'
+  | 'searching_datasets'
+  | 'ranking_sources'
+  | 'validating_evidence'
+  | 'awaiting_route_confirmation'
+  | 'designing_study'
+  | 'downloading_dataset'
+  | 'analyzing'
+  | 'generating_report'
+  | 'reviewing'
+  | 'awaiting_real_data'
+  | 'paused_risk'
+  | 'failed'
+  | 'canceled'
+  | 'completed'
+
+export interface AutonomousRunRef {
+  task_id: string | null
+  run_id: string
+  status: AutonomousStatus
+}
+
+export interface AutonomousRun {
+  id: string
+  project_id: string
+  task_id: string | null
+  status: AutonomousStatus
+  current_node: string
+  config: Record<string, unknown>
+  pause_reason: Record<string, unknown>
+  cancel_requested: boolean
+  error: Record<string, unknown>
+}
+
+export interface AutonomousEvent {
+  run_id: string
+  node: string
+  message: string
+  progress: number
+  timestamp?: string
+}
+
+export interface DatasetCandidate {
+  id: string
+  run_id: string
+  project_id: string
+  source: string
+  external_id: string
+  title: string
+  provenance_url: string
+  score: number
+  selected: boolean
+  candidate_json: {
+    variable_coverage?: number
+    license_name?: string
+    license_status?: string
+    variable_mapping?: Record<string, string>
+    excluded_reason?: string
+    unit?: string
+    [key: string]: unknown
+  }
+}
