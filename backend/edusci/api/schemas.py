@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from edusci.autonomy.contracts import AutonomousStatus
+
 
 class ProjectCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
@@ -123,3 +125,43 @@ class FeedbackSignalView(BaseModel):
     status: str
     auto_applied: bool
     proposal: dict
+
+
+class AutonomousRunCreate(BaseModel):
+    max_literature_rounds: int = Field(default=3, ge=1, le=3)
+    max_results_per_query: int = Field(default=10, ge=1, le=50)
+
+
+class AutonomousRunRef(BaseModel):
+    task_id: str | None = None
+    run_id: str
+    status: str
+
+
+class AutonomousRunView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: str
+    task_id: str | None
+    status: AutonomousStatus
+    current_node: str
+    config: dict
+    pause_reason: dict
+    cancel_requested: bool
+    error: dict
+
+
+class DatasetCandidateView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    run_id: str
+    project_id: str
+    source: str
+    external_id: str
+    title: str
+    provenance_url: str
+    score: int
+    selected: bool
+    candidate_json: dict

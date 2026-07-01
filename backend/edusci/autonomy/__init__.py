@@ -1,0 +1,2 @@
+"""Controlled autonomous research orchestration."""
+

@@ -3,7 +3,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 
@@ -179,3 +188,112 @@ class FeedbackSignal(Base):
     auto_applied: Mapped[bool] = mapped_column(Boolean, default=False)
     proposal: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AutonomousRunRecord(Base):
+    __tablename__ = "autonomous_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), default="queued", index=True)
+    current_node: Mapped[str] = mapped_column(String(80), default="queued")
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    pause_reason: Mapped[dict] = mapped_column(JSON, default=dict)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    error: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class ResearchPlanRecord(Base):
+    __tablename__ = "research_plans"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("autonomous_runs.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    plan_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    schema_valid: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class SearchAttemptRecord(Base):
+    __tablename__ = "search_attempts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("autonomous_runs.id"), index=True)
+    source: Mapped[str] = mapped_column(String(80))
+    query: Mapped[str] = mapped_column(Text)
+    round_number: Mapped[int] = mapped_column(Integer)
+    result_count: Mapped[int] = mapped_column(Integer, default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class DatasetCandidateRecord(Base):
+    __tablename__ = "dataset_candidates"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("autonomous_runs.id"), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    source: Mapped[str] = mapped_column(String(80), index=True)
+    external_id: Mapped[str] = mapped_column(String(300), index=True)
+    title: Mapped[str] = mapped_column(String(500))
+    provenance_url: Mapped[str] = mapped_column(Text)
+    score: Mapped[int] = mapped_column(Integer, default=0)
+    selected: Mapped[bool] = mapped_column(Boolean, default=False)
+    candidate_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class DatasetAssetRecord(Base):
+    __tablename__ = "dataset_assets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("autonomous_runs.id"), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    candidate_id: Mapped[str] = mapped_column(ForeignKey("dataset_candidates.id"), index=True)
+    storage_path: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    row_count: Mapped[int] = mapped_column(Integer)
+    column_count: Mapped[int] = mapped_column(Integer)
+    schema_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    quality_report: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ProvenanceRecord(Base):
+    __tablename__ = "provenance_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("autonomous_runs.id"), index=True)
+    entity_type: Mapped[str] = mapped_column(String(80), index=True)
+    entity_id: Mapped[str] = mapped_column(String(64), index=True)
+    source: Mapped[str] = mapped_column(String(80))
+    source_url: Mapped[str] = mapped_column(Text)
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    license_name: Mapped[str] = mapped_column(String(200), default="")
+    license_url: Mapped[str] = mapped_column(Text, default="")
+    transformations: Mapped[list] = mapped_column(JSON, default=list)
+
+
+class NodeCheckpointRecord(Base):
+    __tablename__ = "node_checkpoints"
+    __table_args__ = (
+        UniqueConstraint("run_id", "node_name", "input_hash", name="uq_checkpoint_input"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("autonomous_runs.id"), index=True)
+    node_name: Mapped[str] = mapped_column(String(80), index=True)
+    input_hash: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(24), default="running")
+    output: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[dict] = mapped_column(JSON, default=dict)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=1)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
