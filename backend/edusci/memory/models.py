@@ -297,3 +297,41 @@ class NodeCheckpointRecord(Base):
     attempt_count: Mapped[int] = mapped_column(Integer, default=1)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ReportArtifactRecord(Base):
+    __tablename__ = "report_artifacts"
+    __table_args__ = (
+        UniqueConstraint("project_id", "version", name="uq_report_artifact_version"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    schema_version: Mapped[int] = mapped_column(Integer, default=2)
+    report_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    review_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    generation_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class DatasetDeclarationRecord(Base):
+    __tablename__ = "dataset_declarations"
+    __table_args__ = (
+        UniqueConstraint("dataset_id", name="uq_dataset_declaration_dataset"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id"), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    origin_type: Mapped[str] = mapped_column(String(32), default="unknown")
+    source_name: Mapped[str] = mapped_column(String(300), default="")
+    source_url: Mapped[str] = mapped_column(Text, default="")
+    license_name: Mapped[str] = mapped_column(String(200), default="")
+    collection_period: Mapped[str] = mapped_column(String(200), default="")
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )

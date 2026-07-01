@@ -7,9 +7,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from edusci.analysis.engine import analyze_dataframe, profile_dataframe
+from edusci.analysis.engine_v2 import analyze_questionnaire
+from edusci.analysis.provenance import classify_dataset_origin
 from edusci.analysis.storage import LocalObjectStore
 from edusci.domain.flow import FlowStage, transition_stage
-from edusci.memory.models import DatasetAssetRecord, DatasetRecord, Project, TaskRecord
+from edusci.memory.models import (
+    DatasetAssetRecord,
+    DatasetDeclarationRecord,
+    DatasetRecord,
+    Project,
+    TaskRecord,
+)
 from edusci.services.projects import _task
 
 
@@ -41,6 +49,16 @@ def save_dataset(
         quality_report=profile,
     )
     session.add(record)
+    session.flush()
+    session.add(
+        DatasetDeclarationRecord(
+            dataset_id=record.id,
+            project_id=project.id,
+            origin_type=classify_dataset_origin(record.file_name),
+            source_name=record.file_name,
+            confirmed=classify_dataset_origin(record.file_name) == "synthetic_demo",
+        )
+    )
     if project.stage == FlowStage.WAITING_FOR_DATA.value:
         project.stage = transition_stage(FlowStage(project.stage), FlowStage.ANALYSIS).value
     session.add(project)
@@ -73,6 +91,16 @@ def promote_public_dataset(
         quality_report=asset.quality_report,
     )
     session.add(record)
+    session.flush()
+    session.add(
+        DatasetDeclarationRecord(
+            dataset_id=record.id,
+            project_id=project.id,
+            origin_type="public_official",
+            source_name=record.file_name,
+            confirmed=True,
+        )
+    )
     session.commit()
     session.refresh(record)
     return record
@@ -95,6 +123,12 @@ def run_analysis(
             raise ValueError("数据集不存在或不属于当前项目")
         frame = store.read_dataframe(dataset.storage_path)
         project.analysis_result = analyze_dataframe(frame, outcome_column, group_column)
+        project.analysis_result.update(
+            analyze_questionnaire(
+                frame,
+                (project.study_design or {}).get("questionnaire", {}),
+            )
+        )
         project.analysis_result["dataset_id"] = dataset.id
         project.analysis_result["quality_report"] = dataset.quality_report
         project.stage = transition_stage(FlowStage(project.stage), FlowStage.REPORT).value

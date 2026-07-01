@@ -27,12 +27,52 @@ export interface StudyDesign {
 }
 
 export interface ResearchReport {
+  schema_version?: number
+  paper_title?: string
+  abstract?: string
+  keywords?: string[]
+  problem_statement?: {
+    current_limitation?: string
+    knowledge_gap?: string
+    research_question?: string
+    evidence_ids?: string[]
+  }
+  rationale?: {
+    innovation?: string
+    reasoning_chain?: string[]
+    evidence_ids?: string[]
+  } | string
+  technical_details?: Array<{
+    purpose: string
+    method: string
+    stack: string[]
+    execution_status: string
+    rationale: string
+  }>
+  datasets?: {
+    source?: Array<Record<string, unknown>>
+    simulation_input?: Array<Record<string, unknown>>
+    target?: Record<string, unknown>
+  }
+  methods?: Array<Record<string, unknown>> | string
+  experiments?: {
+    baselines?: Array<Record<string, unknown>>
+    metrics?: Array<Record<string, unknown>>
+    validation_design?: string
+    robustness_checks?: string[]
+  }
+  results?: {
+    kind?: 'observed_empirical' | 'simulation_feasibility' | 'expected_only'
+    status?: string
+    sample_size?: number | null
+    statistical_findings?: Array<Record<string, unknown>>
+    feasibility_conclusion?: string
+    limitations?: string[]
+  } | string
+  limitations_ethics?: Record<string, unknown> | string
+  references?: Array<Record<string, unknown>>
   title?: string
   problem?: string
-  rationale?: string
-  methods?: string
-  results?: string
-  limitations_ethics?: string
   result_kind?: 'observed' | 'expected_only'
   [key: string]: unknown
 }

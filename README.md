@@ -169,11 +169,15 @@ powershell -ExecutionPolicy Bypass -File scripts\demo-seed.ps1
 - PDF 与证据：`/api/v1/projects/{id}/documents`、`/evidence`
 - 数据与分析：`/api/v1/projects/{id}/datasets`、`/analysis-runs`
 - 报告与复审：`/report-runs`、`/review-runs`、`/report.docx`
+- 报告 V2：`/report-regenerations` 重新生成，`/report-artifacts` 查看历史版本；下载接口可传 `artifact_id` 和 `mode=draft|final`
+- 数据来源声明：`PUT /api/v1/datasets/{id}/provenance`，`unknown` 数据必须人工确认，模拟数据不得作为实证 Source
 - 任务：`/api/v1/tasks/{id}`、`/events`、`/cancel`、`/retry`
 - 自治研究：`/api/v1/projects/{id}/autonomous-runs`、`/api/v1/autonomous-runs/{id}`、`/events`、`/cancel`、`/resume`、`/dataset-candidates`
 - 反馈提案：`/api/v1/projects/{id}/feedback-signals`
 
 OpenAPI 是前后端唯一接口契约，运行后可在 `/docs` 直接试调。
+
+旧项目进入报告页后点击“重新生成 V2”即可保留原报告并创建新版。V2 会分开展示真实/公开 Source、模拟输入与待采集 Target；复审为 WARN 时导出文件标记为“条件版”，BLOCK 时只能导出草稿。
 
 ## 当前 MVP 边界
 

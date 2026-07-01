@@ -72,6 +72,12 @@ class LiteratureScout:
             url=str(raw.get("url") or (f"https://doi.org/{doi}" if doi else "")),
             license_url=str(raw.get("license_url") or ""),
             citation_count=int(raw.get("citation_count") or 0),
+            source_title=str(raw.get("source_title") or ""),
+            volume=str(raw.get("volume") or ""),
+            issue=str(raw.get("issue") or ""),
+            pages=str(raw.get("pages") or ""),
+            publisher=str(raw.get("publisher") or ""),
+            reference_type=str(raw.get("reference_type") or "J"),
             evidence_type=_evidence_type(f"{title} {abstract}"),
             relevance_score=cls._score(raw, concepts),
             exclusion_reason=exclusion,
@@ -166,4 +172,3 @@ class LiteratureScout:
             rounds_completed=rounds_completed,
             stop_reason=stop_reason,
         )
-

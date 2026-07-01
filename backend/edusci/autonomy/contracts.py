@@ -78,6 +78,12 @@ class LiteratureCandidate(BaseModel):
     url: str
     license_url: str = ""
     citation_count: int = 0
+    source_title: str = ""
+    volume: str = ""
+    issue: str = ""
+    pages: str = ""
+    publisher: str = ""
+    reference_type: str = "J"
     evidence_type: Literal["theory", "measurement", "method", "counter", "general"] = (
         "general"
     )

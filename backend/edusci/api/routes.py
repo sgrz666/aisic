@@ -14,6 +14,8 @@ from edusci.api.schemas import (
     AutonomousRunRef,
     AutonomousRunView,
     DatasetCandidateView,
+    DatasetProvenanceUpdate,
+    DatasetProvenanceView,
     EvidenceCardView,
     EvidenceRunRequest,
     AnalysisRunRequest,
@@ -26,6 +28,8 @@ from edusci.api.schemas import (
     DocumentView,
     FeedbackSignalCreate,
     FeedbackSignalView,
+    ReportArtifactView,
+    ReportRegenerationRequest,
 )
 from edusci.autonomy.data_scout import DataScout
 from edusci.autonomy.literature import LiteratureScout
@@ -34,11 +38,13 @@ from edusci.autonomy.planning import ResearchPlanner
 from edusci.memory.models import (
     AutonomousRunRecord,
     DatasetCandidateRecord,
+    DatasetDeclarationRecord,
     DatasetRecord,
     EvidenceCard,
     FeedbackSignal,
     FlowEvent,
     Project,
+    ReportArtifactRecord,
     TaskRecord,
 )
 from edusci.reporting.docx import build_report_docx
@@ -59,6 +65,7 @@ from edusci.services.projects import (
 )
 from edusci.services.study import run_study_design
 from edusci.services.reporting import run_report, run_review
+from edusci.services.reporting_v2 import regenerate_report_v2
 from edusci.services.documents import ingest_pdf
 from edusci.tasks.dispatcher import enqueue_autonomous_run, enqueue_task
 
@@ -481,22 +488,129 @@ def review_run(
 
 @router.get("/projects/{project_id}/report.docx")
 def report_download(
-    project_id: str, mode: str = "final", session: Session = Depends(get_session)
+    project_id: str,
+    mode: str = "final",
+    artifact_id: str | None = None,
+    session: Session = Depends(get_session),
 ) -> Response:
     project = require_project(session, project_id)
-    if not project.report:
+    report = project.report
+    review = project.review
+    if artifact_id:
+        artifact = session.get(ReportArtifactRecord, artifact_id)
+        if artifact is None or artifact.project_id != project_id:
+            raise HTTPException(status_code=404, detail="报告版本不存在")
+        report = artifact.report_json
+        review = artifact.review_json
+    if not report:
         raise HTTPException(status_code=404, detail="研究计划尚未生成")
     if mode not in {"draft", "final"}:
         raise HTTPException(status_code=400, detail="mode 仅支持 draft 或 final")
-    if mode == "final" and project.review.get("overall") == "BLOCK":
+    if mode == "final" and review.get("overall") == "BLOCK":
         raise HTTPException(status_code=409, detail="存在阻断风险，只能导出草稿版")
-    content = build_report_docx(project.report, project.review, mode)
+    content = build_report_docx(report, review, mode)
     disposition = f'attachment; filename="edusci-{project.id[:8]}-{mode}.docx"'
     return Response(
         content,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": disposition},
     )
+
+
+@router.post(
+    "/projects/{project_id}/report-regenerations",
+    response_model=TaskRef,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def report_regenerate(
+    project_id: str,
+    payload: ReportRegenerationRequest,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> dict:
+    project = require_project(session, project_id)
+    task = TaskRecord(
+        project_id=project.id,
+        kind="report_regeneration_v2",
+        status="started",
+        input_payload=payload.model_dump(),
+    )
+    session.add(task)
+    session.commit()
+    try:
+        artifact = regenerate_report_v2(
+            session,
+            project,
+            refresh_evidence=payload.refresh_evidence,
+            model_provider=request.app.state.model_provider,
+            planner=ResearchPlanner(request.app.state.model_provider),
+            literature_scout=LiteratureScout(
+                request.app.state.literature_adapters,
+                max_rounds=request.app.state.autonomous_max_literature_rounds,
+                max_results_per_query=request.app.state.autonomous_max_results_per_query,
+            ),
+        )
+        task.status = "completed"
+        task.resource_id = artifact.id
+        session.add(task)
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        task = session.get(TaskRecord, task.id) or task
+        task.status = "failed"
+        task.retryable = True
+        task.error = {"code": "REPORT_V2_FAILED", "message": str(exc)}
+        session.add(task)
+        session.commit()
+        raise
+    return {"task_id": task.id, "status": task.status, "resource_id": task.resource_id}
+
+
+@router.get(
+    "/projects/{project_id}/report-artifacts",
+    response_model=list[ReportArtifactView],
+)
+def report_artifacts(
+    project_id: str, session: Session = Depends(get_session)
+) -> list[ReportArtifactRecord]:
+    require_project(session, project_id)
+    return list(
+        session.scalars(
+            select(ReportArtifactRecord)
+            .where(ReportArtifactRecord.project_id == project_id)
+            .order_by(ReportArtifactRecord.version)
+        )
+    )
+
+
+@router.put(
+    "/datasets/{dataset_id}/provenance",
+    response_model=DatasetProvenanceView,
+)
+def dataset_provenance_update(
+    dataset_id: str,
+    payload: DatasetProvenanceUpdate,
+    session: Session = Depends(get_session),
+) -> DatasetDeclarationRecord:
+    dataset = session.get(DatasetRecord, dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="数据集不存在")
+    declaration = session.scalar(
+        select(DatasetDeclarationRecord).where(
+            DatasetDeclarationRecord.dataset_id == dataset_id
+        )
+    )
+    if declaration is None:
+        declaration = DatasetDeclarationRecord(
+            dataset_id=dataset.id,
+            project_id=dataset.project_id,
+        )
+    for key, value in payload.model_dump().items():
+        setattr(declaration, key, value)
+    session.add(declaration)
+    session.commit()
+    session.refresh(declaration)
+    return declaration
 
 
 @router.get("/tasks/{task_id}", response_model=TaskView)

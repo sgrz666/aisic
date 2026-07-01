@@ -12,6 +12,9 @@ from edusci.autonomy.contracts import (
 
 
 _ENGLISH_ALIASES = {
+    "AI发展": "artificial intelligence development",
+    "大学生": "university students",
+    "心理健康": "mental health",
     "人口变化": "population change",
     "学龄人口": "school-age population",
     "基础教育资源配置": "basic education resource allocation",
@@ -143,4 +146,3 @@ class ResearchPlanner:
             for query in payload["literature_queries"]
         ]
         return ResearchPlan.model_validate(payload)
-

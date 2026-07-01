@@ -37,6 +37,7 @@ class SourceInput(BaseModel):
     locator: str = ""
     excerpt: str
     verified: bool = False
+    bibliographic: dict = Field(default_factory=dict)
 
 
 class EvidenceRunRequest(BaseModel):
@@ -165,3 +166,43 @@ class DatasetCandidateView(BaseModel):
     score: int
     selected: bool
     candidate_json: dict
+
+
+class ReportRegenerationRequest(BaseModel):
+    refresh_evidence: bool = True
+
+
+class ReportArtifactView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: str
+    version: int
+    schema_version: int
+    report_json: dict
+    review_json: dict
+    generation_config: dict
+
+
+class DatasetProvenanceUpdate(BaseModel):
+    origin_type: Literal[
+        "real_collected", "public_official", "synthetic_demo", "unknown"
+    ]
+    source_name: str = ""
+    source_url: str = ""
+    license_name: str = ""
+    collection_period: str = ""
+    confirmed: bool = False
+
+
+class DatasetProvenanceView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    dataset_id: str
+    project_id: str
+    origin_type: str
+    source_name: str
+    source_url: str
+    license_name: str
+    collection_period: str
+    confirmed: bool

@@ -97,6 +97,12 @@ export const runAnalysis = (
 export const reportDownloadUrl = (id: string, mode: 'draft' | 'final') =>
   `/api/v1/projects/${id}/report.docx?mode=${mode}`
 
+export const regenerateReport = (id: string) =>
+  runTask(`/api/v1/projects/${id}/report-regenerations`, {
+    method: 'POST',
+    body: JSON.stringify({ refresh_evidence: true }),
+  })
+
 export const startAutonomousResearch = (projectId: string) =>
   request<AutonomousRunRef>(`/api/v1/projects/${projectId}/autonomous-runs`, {
     method: 'POST',

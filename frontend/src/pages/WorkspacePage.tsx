@@ -183,7 +183,7 @@ export function WorkspacePage() {
         return <Result className="paper-panel" icon={<FileSearchOutlined />} title="报告等待独立复审" subTitle="将并行检查引用、统计、逻辑与伦理边界。" extra={<Button type="primary" loading={busy} onClick={() => action(() => runReview(project.id))}>运行四类复审</Button>} />
       case 'COMPLETED':
       case 'BLOCKED':
-        return <ReportPanel projectId={project.id} report={project.report} review={project.review} />
+        return <ReportPanel projectId={project.id} report={project.report} review={project.review} onRegenerated={refresh} />
       default:
         return <Result status="warning" title={project.stage} subTitle="该阶段需要从任务记录恢复。" />
     }

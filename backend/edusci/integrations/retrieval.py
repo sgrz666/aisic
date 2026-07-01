@@ -47,7 +47,7 @@ class CrossrefLiteratureAdapter(_LiteratureHttpAdapter):
             {
                 "query.bibliographic": query,
                 "rows": limit,
-                "select": "title,DOI,abstract,type,author,published,license,URL",
+                "select": "title,DOI,abstract,type,author,published,license,URL,container-title,volume,issue,page,publisher",
             },
         )
         results: list[dict] = []
@@ -72,6 +72,12 @@ class CrossrefLiteratureAdapter(_LiteratureHttpAdapter):
                     "url": item.get("URL") or (f"https://doi.org/{doi}" if doi else ""),
                     "license_url": licenses[0].get("URL", "") if licenses else "",
                     "citation_count": 0,
+                    "source_title": (item.get("container-title") or [""])[0],
+                    "volume": item.get("volume") or "",
+                    "issue": item.get("issue") or "",
+                    "pages": item.get("page") or "",
+                    "publisher": item.get("publisher") or "",
+                    "reference_type": "J",
                 }
             )
         return results
@@ -85,7 +91,7 @@ class SemanticScholarLiteratureAdapter(_LiteratureHttpAdapter):
 
     _fields = (
         "paperId,title,url,abstract,year,authors,externalIds,citationCount,"
-        "fieldsOfStudy,publicationDate"
+        "fieldsOfStudy,publicationDate,venue,journal"
     )
 
     def __init__(
@@ -131,6 +137,10 @@ class SemanticScholarLiteratureAdapter(_LiteratureHttpAdapter):
             "url": item.get("url") or (f"https://doi.org/{doi}" if doi else ""),
             "license_url": "",
             "citation_count": int(item.get("citationCount") or 0),
+            "source_title": (item.get("journal") or {}).get("name") or item.get("venue") or "",
+            "volume": (item.get("journal") or {}).get("volume") or "",
+            "pages": (item.get("journal") or {}).get("pages") or "",
+            "reference_type": "J",
         }
 
 

@@ -278,6 +278,34 @@ body::before {
 .dataset-candidate a { display: inline-flex; gap: 6px; align-items: center; margin-top: 10px; color: var(--navy); font-size: 12px; font-weight: 700; }
 .data-upload-panel { display: grid; grid-template-columns: 1fr 360px; gap: 40px; align-items: center; }
 .report-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 28px; }
+.report-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.report-status-strip { display: grid; grid-template-columns: repeat(4, 1fr); margin: 28px 0; border: 1px solid var(--line); }
+.report-status-strip > div { padding: 18px; border-right: 1px solid var(--line); }
+.report-status-strip > div:last-child { border-right: 0; }
+.report-abstract { margin: 28px 0; padding: 24px 28px; background: #f1ece1; border-left: 4px solid var(--vermilion); }
+.report-abstract > span { font: 700 13px "Songti SC", serif; color: var(--vermilion); }
+.report-abstract p { margin: 10px 0 0; color: var(--ink); text-align: justify; }
+.report-section-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.report-section-card { padding: 24px; border: 1px solid var(--line); background: rgba(255,253,247,.72); }
+.report-section-card h3, .report-detail-section h3, .report-result-callout h3 { margin: 6px 0 14px; font-size: 21px; }
+.report-section-card strong { display: block; margin-top: 14px; color: var(--navy); }
+.report-section-card ol { margin: 14px 0 0; padding-left: 22px; color: var(--muted); line-height: 1.8; }
+.report-detail-section { margin-top: 20px; padding: 24px; border-top: 3px solid var(--navy); background: #f7f3ea; }
+.report-detail-heading { display: flex; gap: 12px; align-items: center; }
+.report-detail-heading > .anticon { font-size: 25px; color: var(--vermilion); }
+.technical-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.technical-grid article { padding: 17px; border: 1px solid var(--line); background: var(--white); }
+.technical-grid strong, .technical-grid span, .technical-grid small { display: block; }
+.technical-grid strong { margin-top: 10px; font-family: "Songti SC", serif; font-size: 16px; }
+.technical-grid span, .technical-grid small { color: var(--muted); }
+.technical-grid p { margin: 8px 0; font-size: 12px; }
+.dataset-report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+.dataset-report-grid article { padding: 18px; color: white; background: var(--navy-dark); }
+.dataset-report-grid article:last-child { background: #74402f; }
+.dataset-report-grid p, .dataset-report-grid small { color: rgba(255,255,255,.75); }
+.report-result-callout { display: grid; grid-template-columns: 1fr 130px 1.4fr; gap: 22px; align-items: center; margin-top: 20px; padding: 26px; color: white; background: var(--navy-dark); }
+.report-result-callout p, .report-result-callout small { color: rgba(255,255,255,.74); }
+.report-panel--v2 > .ant-alert { margin-top: 12px; }
 .evidence-summary { display: flex; align-items: end; gap: 12px; padding: 18px; margin-bottom: 18px; color: white; background: var(--navy-dark); }
 .evidence-summary strong { font: 700 38px/1 "Songti SC", serif; color: #d9ad5a; }
 .evidence-list { display: grid; gap: 14px; }
@@ -306,6 +334,9 @@ body::before {
   .score-grid { grid-template-columns: 1fr 1fr; }
   .route-card { grid-column: 1 / -1; }
   .data-upload-panel { grid-template-columns: 1fr; }
+  .report-status-strip { grid-template-columns: repeat(2, 1fr); }
+  .report-section-grid, .technical-grid, .dataset-report-grid { grid-template-columns: 1fr; }
+  .report-result-callout { grid-template-columns: 1fr; }
   .autonomous-panel--idle { grid-template-columns: 64px 1fr; }
   .autonomous-panel--idle > .ant-btn { grid-column: 1 / -1; }
   .dataset-candidates__list { grid-template-columns: 1fr; }
@@ -331,6 +362,9 @@ body::before {
   .score-grid, .drop-grid { grid-template-columns: 1fr; }
   .route-card { grid-column: auto; }
   .gate-panel__header, .report-panel__top { flex-direction: column; }
+  .report-status-strip { grid-template-columns: 1fr; }
+  .report-status-strip > div { border-right: 0; border-bottom: 1px solid var(--line); }
+  .report-actions { flex-direction: column; }
   .autonomous-panel { padding: 22px 18px; }
   .autonomous-panel--idle { grid-template-columns: 1fr; }
   .autonomous-panel__seal { width: 52px; height: 52px; }

@@ -426,6 +426,17 @@ class AutonomousOrchestrator:
                     locator=locator,
                     excerpt=candidate["abstract"],
                     verified=True,
+                    bibliographic={
+                        "authors": candidate.get("authors", []),
+                        "year": candidate.get("year"),
+                        "source_title": candidate.get("source_title", ""),
+                        "volume": candidate.get("volume", ""),
+                        "issue": candidate.get("issue", ""),
+                        "pages": candidate.get("pages", ""),
+                        "publisher": candidate.get("publisher", ""),
+                        "doi": candidate.get("doi", ""),
+                        "reference_type": candidate.get("reference_type", "J"),
+                    },
                 )
             )
         run_evidence_build(self.session, project, sources)

@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 from edusci.api.schemas import ProjectCreate, SourceInput
 from edusci.autonomy.contracts import ResearchPlan
 from edusci.domain.flow import FlowStage, ResearchScores, determine_route, transition_stage
-from edusci.memory.models import EvidenceCard, FlowEvent, Project, TaskRecord
+from edusci.memory.models import (
+    EvidenceCard,
+    FlowEvent,
+    KnowledgeEntity,
+    Project,
+    TaskRecord,
+)
 
 
 def require_project(session: Session, project_id: str) -> Project:
@@ -171,8 +177,7 @@ def run_evidence_build(
             )
             if existing is not None:
                 continue
-            session.add(
-                EvidenceCard(
+            card = EvidenceCard(
                     project_id=project.id,
                     title=source.title,
                     source_type=source.source_type,
@@ -183,7 +188,18 @@ def run_evidence_build(
                     content_hash=content_hash,
                     trust_status=_trust_status(source),
                 )
-            )
+            session.add(card)
+            session.flush()
+            if source.bibliographic:
+                session.add(
+                    KnowledgeEntity(
+                        project_id=project.id,
+                        entity_type="Source",
+                        name=source.title,
+                        content_hash=content_hash,
+                        payload=source.bibliographic,
+                    )
+                )
         session.flush()
 
     return _task(session, project, "evidence_build", build, task)
