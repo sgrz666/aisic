@@ -4,6 +4,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from redis import Redis
@@ -12,7 +13,12 @@ from rq import Queue
 from edusci.api.routes import router
 from edusci.analysis.storage import LocalObjectStore
 from edusci.integrations.qwen import QwenProvider
-from edusci.integrations.retrieval import OpenResearchRetriever
+from edusci.integrations.datasets import default_dataset_adapters
+from edusci.integrations.retrieval import (
+    CrossrefLiteratureAdapter,
+    OpenResearchRetriever,
+    SemanticScholarLiteratureAdapter,
+)
 from edusci.memory.database import build_session_factory
 
 
@@ -22,6 +28,8 @@ def create_app(
     storage_root: str | Path | None = None,
     model_provider=None,
     task_queue=None,
+    literature_adapters=None,
+    dataset_adapters=None,
 ) -> FastAPI:
     resolved_database = database_url or os.getenv(
         "DATABASE_URL", "sqlite+pysqlite:///./data/edusci.db"
@@ -55,12 +63,28 @@ def create_app(
             redis = Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
             app.state.task_queue = Queue("edusci", connection=redis)
         app.state.model_provider = resolved_provider
+        shared_client = None
+        if literature_adapters is None or dataset_adapters is None:
+            shared_client = httpx.Client(
+                timeout=30,
+                follow_redirects=True,
+                headers={"User-Agent": "EduSci-MVP/0.2"},
+            )
+        app.state.literature_adapters = literature_adapters or [
+            CrossrefLiteratureAdapter(shared_client),
+            SemanticScholarLiteratureAdapter(shared_client),
+        ]
+        app.state.dataset_adapters = dataset_adapters or default_dataset_adapters(
+            shared_client
+        )
         app.state.retriever = (
             OpenResearchRetriever()
             if os.getenv("ENABLE_LIVE_RETRIEVAL", "false").lower() == "true"
             else None
         )
         yield
+        if shared_client is not None:
+            shared_client.close()
 
     app = FastAPI(
         title="教育智研 API",

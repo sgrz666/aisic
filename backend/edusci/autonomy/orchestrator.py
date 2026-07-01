@@ -47,6 +47,22 @@ class AutonomousOrchestrator:
         run = create_autonomous_run(self.session, project, config)
         return self._run_to_gate(run, project)
 
+    def start_existing(self, run_id: str) -> AutonomousRunRecord:
+        run = require_autonomous_run(self.session, run_id)
+        project = self.session.get(Project, run.project_id)
+        if project is None:
+            raise RuntimeError("自治研究关联的项目不存在")
+        if project.stage != "S0_IDEA":
+            return self.resume(run_id)
+        if run.task_id:
+            task = self.session.get(TaskRecord, run.task_id)
+            if task:
+                task.status = "started"
+        run.status = "planning"
+        self.session.add(run)
+        self.session.commit()
+        return self._run_to_gate(run, project)
+
     def resume(self, run_id: str) -> AutonomousRunRecord:
         run = require_autonomous_run(self.session, run_id)
         project = self.session.get(Project, run.project_id)

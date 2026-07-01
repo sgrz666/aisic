@@ -7,8 +7,17 @@ from sqlalchemy import select
 
 from edusci.analysis.storage import LocalObjectStore
 from edusci.api.schemas import SourceInput
+from edusci.autonomy.data_scout import DataScout
+from edusci.autonomy.literature import LiteratureScout
+from edusci.autonomy.orchestrator import AutonomousOrchestrator
+from edusci.autonomy.planning import ResearchPlanner
+from edusci.integrations.datasets import default_dataset_adapters
 from edusci.integrations.qwen import QwenProvider
-from edusci.integrations.retrieval import OpenResearchRetriever
+from edusci.integrations.retrieval import (
+    CrossrefLiteratureAdapter,
+    OpenResearchRetriever,
+    SemanticScholarLiteratureAdapter,
+)
 from edusci.memory.database import build_session_factory
 from edusci.memory.models import DatasetRecord, Project, TaskRecord
 from edusci.services.analysis import run_analysis
@@ -29,6 +38,37 @@ def _provider():
         generation_model=os.getenv("QWEN_GENERATION_MODEL", "qwen-plus"),
         review_model=os.getenv("QWEN_REVIEW_MODEL", "qwen-max"),
     )
+
+
+def default_literature_adapters() -> list:
+    return [CrossrefLiteratureAdapter(), SemanticScholarLiteratureAdapter()]
+
+
+def execute_autonomous_run(
+    run_id: str,
+    database_url: str,
+    storage_root: str,
+    action: str = "start",
+    dataset_id: str | None = None,
+) -> None:
+    session_factory = build_session_factory(database_url)
+    with session_factory() as session:
+        store = LocalObjectStore(Path(storage_root))
+        orchestrator = AutonomousOrchestrator(
+            session=session,
+            store=store,
+            planner=ResearchPlanner(_provider()),
+            literature_scout=LiteratureScout(default_literature_adapters()),
+            data_scout=DataScout(default_dataset_adapters(), store),
+        )
+        if action == "start":
+            orchestrator.start_existing(run_id)
+        elif action == "real_data":
+            if not dataset_id:
+                raise ValueError("真实数据恢复任务缺少 dataset_id")
+            orchestrator.resume_after_real_data(run_id, dataset_id)
+        else:
+            orchestrator.resume(run_id)
 
 
 def execute_task(task_id: str, database_url: str, storage_root: str) -> None:

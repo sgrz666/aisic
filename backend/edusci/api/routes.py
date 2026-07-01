@@ -10,6 +10,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from edusci.api.schemas import (
+    AutonomousRunCreate,
+    AutonomousRunRef,
+    AutonomousRunView,
+    DatasetCandidateView,
     EvidenceCardView,
     EvidenceRunRequest,
     AnalysisRunRequest,
@@ -23,7 +27,13 @@ from edusci.api.schemas import (
     FeedbackSignalCreate,
     FeedbackSignalView,
 )
+from edusci.autonomy.data_scout import DataScout
+from edusci.autonomy.literature import LiteratureScout
+from edusci.autonomy.orchestrator import AutonomousOrchestrator
+from edusci.autonomy.planning import ResearchPlanner
 from edusci.memory.models import (
+    AutonomousRunRecord,
+    DatasetCandidateRecord,
     DatasetRecord,
     EvidenceCard,
     FeedbackSignal,
@@ -33,6 +43,11 @@ from edusci.memory.models import (
 )
 from edusci.reporting.docx import build_report_docx
 from edusci.services.analysis import run_analysis, save_dataset
+from edusci.services.autonomy import (
+    create_autonomous_run,
+    request_cancellation,
+    require_autonomous_run,
+)
 from edusci.services.projects import (
     confirm_route,
     create_project,
@@ -45,7 +60,7 @@ from edusci.services.projects import (
 from edusci.services.study import run_study_design
 from edusci.services.reporting import run_report, run_review
 from edusci.services.documents import ingest_pdf
-from edusci.tasks.dispatcher import enqueue_task
+from edusci.tasks.dispatcher import enqueue_autonomous_run, enqueue_task
 
 router = APIRouter(prefix="/api/v1")
 
@@ -79,6 +94,19 @@ def submit_task(
     return inline()
 
 
+def autonomous_orchestrator(
+    request: Request, session: Session
+) -> AutonomousOrchestrator:
+    store = request.app.state.object_store
+    return AutonomousOrchestrator(
+        session=session,
+        store=store,
+        planner=ResearchPlanner(request.app.state.model_provider),
+        literature_scout=LiteratureScout(request.app.state.literature_adapters),
+        data_scout=DataScout(request.app.state.dataset_adapters, store),
+    )
+
+
 @router.post("/projects", response_model=ProjectSnapshot, status_code=status.HTTP_201_CREATED)
 def projects_create(payload: ProjectCreate, session: Session = Depends(get_session)) -> dict:
     return snapshot(create_project(session, payload))
@@ -92,6 +120,133 @@ def projects_list(session: Session = Depends(get_session)) -> list[dict]:
 @router.get("/projects/{project_id}", response_model=ProjectSnapshot)
 def projects_get(project_id: str, session: Session = Depends(get_session)) -> dict:
     return snapshot(require_project(session, project_id))
+
+
+@router.post(
+    "/projects/{project_id}/autonomous-runs",
+    response_model=AutonomousRunRef,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def autonomous_run_start(
+    project_id: str,
+    payload: AutonomousRunCreate,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> dict:
+    project = require_project(session, project_id)
+    config = payload.model_dump()
+    if request.app.state.task_mode == "rq":
+        run = create_autonomous_run(session, project, config, queued=True)
+        run = enqueue_autonomous_run(
+            session,
+            request.app.state.task_queue,
+            request.app.state.database_url,
+            request.app.state.storage_root,
+            run,
+            action="start",
+        )
+    else:
+        run = autonomous_orchestrator(request, session).start(project, config)
+    return {"task_id": run.task_id, "run_id": run.id, "status": run.status}
+
+
+@router.get("/autonomous-runs/{run_id}", response_model=AutonomousRunView)
+def autonomous_run_get(
+    run_id: str, session: Session = Depends(get_session)
+) -> AutonomousRunRecord:
+    return require_autonomous_run(session, run_id)
+
+
+@router.get("/autonomous-runs/{run_id}/events")
+def autonomous_run_events(
+    run_id: str, session: Session = Depends(get_session)
+) -> StreamingResponse:
+    run = require_autonomous_run(session, run_id)
+    events = []
+    if run.task_id:
+        events = list(
+            session.scalars(
+                select(FlowEvent)
+                .where(FlowEvent.task_id == run.task_id)
+                .order_by(FlowEvent.id)
+            )
+        )
+
+    def stream():
+        for event in events:
+            yield (
+                f"event: {event.event_type}\n"
+                f"data: {json.dumps(event.payload, ensure_ascii=False)}\n\n"
+            )
+        terminal_payload = {
+            "run_id": run.id,
+            "node": run.current_node,
+            "status": run.status,
+            "pause_reason": run.pause_reason,
+        }
+        yield (
+            f"event: {run.status}\n"
+            f"data: {json.dumps(terminal_payload, ensure_ascii=False)}\n\n"
+        )
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@router.post("/autonomous-runs/{run_id}/cancel", response_model=AutonomousRunRef)
+def autonomous_run_cancel(
+    run_id: str, request: Request, session: Session = Depends(get_session)
+) -> dict:
+    run = request_cancellation(session, require_autonomous_run(session, run_id))
+    if request.app.state.task_mode != "rq":
+        run = autonomous_orchestrator(request, session).resume(run.id)
+    return {"task_id": run.task_id, "run_id": run.id, "status": run.status}
+
+
+@router.post(
+    "/autonomous-runs/{run_id}/resume",
+    response_model=AutonomousRunRef,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def autonomous_run_resume(
+    run_id: str, request: Request, session: Session = Depends(get_session)
+) -> dict:
+    run = require_autonomous_run(session, run_id)
+    if run.status == "canceled":
+        run.cancel_requested = False
+        session.add(run)
+        session.commit()
+    if request.app.state.task_mode == "rq":
+        run = enqueue_autonomous_run(
+            session,
+            request.app.state.task_queue,
+            request.app.state.database_url,
+            request.app.state.storage_root,
+            run,
+            action="resume",
+        )
+    else:
+        run = autonomous_orchestrator(request, session).resume(run.id)
+    return {"task_id": run.task_id, "run_id": run.id, "status": run.status}
+
+
+@router.get(
+    "/autonomous-runs/{run_id}/dataset-candidates",
+    response_model=list[DatasetCandidateView],
+)
+def autonomous_dataset_candidates(
+    run_id: str, session: Session = Depends(get_session)
+) -> list[DatasetCandidateRecord]:
+    require_autonomous_run(session, run_id)
+    return list(
+        session.scalars(
+            select(DatasetCandidateRecord)
+            .where(DatasetCandidateRecord.run_id == run_id)
+            .order_by(
+                DatasetCandidateRecord.selected.desc(),
+                DatasetCandidateRecord.score.desc(),
+            )
+        )
+    )
 
 
 @router.post(
@@ -205,14 +360,39 @@ async def dataset_upload(
     session: Session = Depends(get_session),
 ):
     content = await file.read()
-    return save_dataset(
+    project = require_project(session, project_id)
+    dataset = save_dataset(
         session,
         request.app.state.object_store,
-        require_project(session, project_id),
+        project,
         file.filename or "dataset.csv",
         file.content_type or "application/octet-stream",
         content,
     )
+    active_run = session.scalar(
+        select(AutonomousRunRecord)
+        .where(
+            AutonomousRunRecord.project_id == project_id,
+            AutonomousRunRecord.status == "awaiting_real_data",
+        )
+        .order_by(AutonomousRunRecord.created_at.desc())
+    )
+    if active_run is not None:
+        if request.app.state.task_mode == "rq":
+            enqueue_autonomous_run(
+                session,
+                request.app.state.task_queue,
+                request.app.state.database_url,
+                request.app.state.storage_root,
+                active_run,
+                action="real_data",
+                dataset_id=dataset.id,
+            )
+        else:
+            autonomous_orchestrator(request, session).resume_after_real_data(
+                active_run.id, dataset.id
+            )
+    return dataset
 
 
 @router.post(

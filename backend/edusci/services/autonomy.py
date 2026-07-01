@@ -3,23 +3,45 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from edusci.memory.models import AutonomousRunRecord, Project, TaskRecord
+from edusci.memory.models import AutonomousRunRecord, FlowEvent, Project, TaskRecord
 
 
 def create_autonomous_run(
-    session: Session, project: Project, config: dict | None = None
+    session: Session,
+    project: Project,
+    config: dict | None = None,
+    *,
+    queued: bool = False,
 ) -> AutonomousRunRecord:
-    task = TaskRecord(project_id=project.id, kind="autonomous_research", status="started")
+    initial_status = "queued" if queued else "planning"
+    task = TaskRecord(
+        project_id=project.id,
+        kind="autonomous_research",
+        status="queued" if queued else "started",
+    )
     session.add(task)
     session.flush()
     run = AutonomousRunRecord(
         project_id=project.id,
         task_id=task.id,
-        status="planning",
-        current_node="planning",
+        status=initial_status,
+        current_node=initial_status,
         config=config or {},
     )
     session.add(run)
+    session.flush()
+    session.add(
+        FlowEvent(
+            task_id=task.id,
+            event_type="started",
+            payload={
+                "run_id": run.id,
+                "node": initial_status,
+                "message": "自治研究任务已创建",
+                "progress": 0,
+            },
+        )
+    )
     session.commit()
     session.refresh(run)
     return run
