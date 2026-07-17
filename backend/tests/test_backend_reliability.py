@@ -203,6 +203,7 @@ def test_repository_test_script_enforces_lint_and_backend_coverage() -> None:
     assert '--cov-fail-under=85' in script
     assert '-W error::ResourceWarning' in script
     assert 'security-check.ps1' in script
+    assert 'eval-quality.ps1' in script
 
 
 def test_repository_security_script_scans_worktree_and_git_history() -> None:
@@ -213,3 +214,12 @@ def test_repository_security_script_scans_worktree_and_git_history() -> None:
     assert "git rev-list" in script
     assert "DASHSCOPE_API_KEY" in script
     assert "sk-[A-Za-z0-9_-]" in script
+
+
+def test_quality_script_runs_the_offline_evaluation_by_default() -> None:
+    script_path = Path(__file__).parents[2] / "scripts" / "eval-quality.ps1"
+    script = script_path.read_text(encoding="utf-8")
+
+    assert 'ValidateSet("Offline", "LiveQwen")' in script
+    assert "edusci.evaluation" in script
+    assert "quality-report.json" in script

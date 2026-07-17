@@ -16,6 +16,9 @@ try {
   Assert-CommandSucceeded "Backend tests"
 } finally { Pop-Location }
 
+& (Join-Path $PSScriptRoot "eval-quality.ps1") -Mode Offline
+Assert-CommandSucceeded "Offline research quality evaluation"
+
 Push-Location (Join-Path $Root "frontend")
 try {
   npm test -- --run
