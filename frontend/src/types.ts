@@ -149,6 +149,66 @@ export interface AutonomousRun {
   pause_reason: Record<string, unknown>
   cancel_requested: boolean
   error: Record<string, unknown>
+  current_iteration?: number
+  source_count?: number
+  fulltext_count?: number
+  claim_count?: number
+  coverage?: number
+  counter_evidence_coverage?: number
+  model_usage?: Record<string, number>
+  stop_reason?: string
+  degraded_sources?: string[]
+}
+
+export interface ResearchIteration {
+  iteration: number
+  queries: string[]
+  metrics: Record<string, number>
+  gaps: string[]
+  stop_reason: string
+}
+
+export interface AutonomousResearchState {
+  run_id: string
+  limits: Record<string, number | string>
+  metrics: {
+    current_iteration: number
+    source_count: number
+    fulltext_count: number
+    claim_count: number
+    coverage: number
+    counter_evidence_coverage: number
+    model_usage: Record<string, number>
+    stop_reason: string
+    degraded_sources: string[]
+  }
+  iterations: ResearchIteration[]
+}
+
+export interface EvidenceGraphClaim {
+  id: string
+  statement: string
+  claim_type: string
+}
+
+export interface EvidenceGraphItem {
+  id: string
+  claim_id: string
+  stance: 'supports' | 'counter' | 'qualifies'
+  confidence: number
+  locator: string
+  excerpt: string
+  document: {
+    id: string
+    title: string
+    url: string
+    license_name: string
+  }
+}
+
+export interface EvidenceGraph {
+  claims: EvidenceGraphClaim[]
+  evidence: EvidenceGraphItem[]
 }
 
 export interface AutonomousEvent {

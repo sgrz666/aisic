@@ -7,6 +7,7 @@ from edusci.analysis.storage import LocalObjectStore
 from edusci.api.schemas import SourceInput
 from edusci.autonomy.checkpoints import CheckpointStore
 from edusci.autonomy.contracts import ResearchPlan
+from edusci.autonomy.contracts import DeepResearchLimits
 from edusci.autonomy.data_scout import DataScout, DataScoutResult
 from edusci.autonomy.literature import LiteratureScout
 from edusci.autonomy.planning import ResearchPlanner
@@ -22,7 +23,7 @@ from edusci.memory.models import (
 )
 from edusci.services.autonomy import create_autonomous_run, require_autonomous_run
 from edusci.services.analysis import promote_public_dataset, run_analysis
-from edusci.services.projects import run_evidence_build, run_gate, run_idea_parse
+from edusci.services.projects import confirm_route, run_evidence_build, run_gate, run_idea_parse
 from edusci.services.reporting import run_report, run_review
 from edusci.services.study import run_study_design
 
@@ -36,12 +37,14 @@ class AutonomousOrchestrator:
         planner: ResearchPlanner,
         literature_scout: LiteratureScout,
         data_scout: DataScout,
+        deep_research_engine=None,
     ) -> None:
         self.session = session
         self.store = store
         self.planner = planner
         self.literature_scout = literature_scout
         self.data_scout = data_scout
+        self.deep_research_engine = deep_research_engine
 
     def start(self, project: Project, config: dict | None = None) -> AutonomousRunRecord:
         run = create_autonomous_run(self.session, project, config)
@@ -258,6 +261,26 @@ class AutonomousOrchestrator:
                 message="多轮检索并筛选可追溯文献",
             ).output
 
+            if self.deep_research_engine is not None:
+                self._check_canceled(run)
+                run.status = "validating_evidence"
+                self.session.commit()
+                deep_output = checkpoints.run_node(
+                    "deep_research",
+                    {
+                        "queries": [query.query for query in plan.literature_queries],
+                        "limits": {
+                            key: value
+                            for key, value in run.config.items()
+                            if key in DeepResearchLimits.model_fields
+                        },
+                    },
+                    lambda: self._deep_research(run, project, plan),
+                    progress=55,
+                    message="解析开放全文并迭代补齐证据与反证",
+                ).output
+                self._apply_deep_metrics(run, deep_output)
+
             self._check_canceled(run)
             run.status = "searching_datasets"
             self.session.commit()
@@ -304,6 +327,13 @@ class AutonomousOrchestrator:
                 progress=85,
                 message="计算信息充足度与可研究性",
             )
+            if not bool(run.config.get("require_route_confirmation", True)):
+                confirm_route(
+                    self.session,
+                    project,
+                    project.suggested_route or "D",
+                )
+                return self._run_after_route(run, project)
             run.status = "awaiting_route_confirmation"
             run.current_node = "human_gate"
             run.pause_reason = {
@@ -411,6 +441,37 @@ class AutonomousOrchestrator:
                 )
         self.session.commit()
         return result.model_dump(mode="json")
+
+    def _deep_research(
+        self, run: AutonomousRunRecord, project: Project, plan: ResearchPlan
+    ) -> dict:
+        limit_fields = set(DeepResearchLimits.model_fields)
+        limits = DeepResearchLimits.model_validate(
+            {key: value for key, value in run.config.items() if key in limit_fields}
+        )
+        result = self.deep_research_engine.run(
+            run_id=run.id,
+            project_id=project.id,
+            seed_queries=[query.query for query in plan.literature_queries],
+            subquestions=[plan.problem_statement, *plan.concepts],
+            limits=limits,
+        )
+        return result.model_dump(mode="json")
+
+    def _apply_deep_metrics(self, run: AutonomousRunRecord, output: dict) -> None:
+        run.current_iteration = int(output.get("iterations") or 0)
+        run.source_count = int(output.get("source_count") or 0)
+        run.fulltext_count = int(output.get("fulltext_count") or 0)
+        run.claim_count = int(output.get("claim_count") or 0)
+        run.coverage = int(output.get("coverage") or 0)
+        run.counter_evidence_coverage = int(
+            output.get("counter_evidence_coverage") or 0
+        )
+        run.model_usage = dict(output.get("model_usage") or {})
+        run.stop_reason = str(output.get("stop_reason") or "")
+        run.degraded_sources = list(output.get("degraded_sources") or [])
+        self.session.add(run)
+        self.session.commit()
 
     def _persist_evidence(self, project: Project, literature_output: dict) -> dict:
         sources = []

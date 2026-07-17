@@ -354,6 +354,58 @@ def _build_v2(report: dict, review: dict, mode: str) -> bytes:
     if review_rows:
         _add_table(document, ["复审项", "状态", "说明"], review_rows, [1900, 1000, 6126])
 
+    if report.get("schema_version", 2) >= 3:
+        _heading(document, "9 证据矩阵与结论")
+        methodology = report.get("research_methodology", {})
+        _body(
+            document,
+            (
+                f"完成 {methodology.get('iterations', 0)} 轮证据检索，"
+                f"解析 {methodology.get('fulltexts_parsed', 0)} 篇开放全文。"
+            ),
+        )
+        conclusions = report.get("conclusions", [])
+        if conclusions:
+            _add_table(
+                document,
+                ["观点", "置信度", "证据ID"],
+                [
+                    [
+                        item["statement"],
+                        item["confidence"],
+                        "、".join(item.get("evidence_ids", [])),
+                    ]
+                    for item in conclusions
+                ],
+                [4800, 1300, 2926],
+            )
+        evidence = report.get("evidence_ledger", [])
+        if evidence:
+            _add_table(
+                document,
+                ["来源", "立场", "定位", "证据片段", "对应观点"],
+                [
+                    [
+                        item.get("document_title", ""),
+                        item.get("stance", ""),
+                        item.get("locator", ""),
+                        item.get("excerpt", ""),
+                        next(
+                            (
+                                conclusion["statement"]
+                                for conclusion in conclusions
+                                if conclusion["claim_id"] == item.get("claim_id")
+                            ),
+                            item.get("claim_id", ""),
+                        ),
+                    ]
+                    for item in evidence
+                ],
+                [1600, 900, 1000, 3000, 2526],
+            )
+        for conflict in report.get("conflicting_evidence", []):
+            _bullet(document, f"冲突证据：{conflict.get('statement', '')}")
+
     document.add_page_break()
     _heading(document, "参考文献")
     if references:
@@ -398,6 +450,6 @@ def _build_legacy(report: dict, review: dict, mode: str) -> bytes:
 
 
 def build_report_docx(report: dict, review: dict, mode: str) -> bytes:
-    if report.get("schema_version") == 2:
+    if report.get("schema_version", 0) >= 2:
         return _build_v2(report, review, mode)
     return _build_legacy(report, review, mode)

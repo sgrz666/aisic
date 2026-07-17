@@ -202,6 +202,15 @@ class AutonomousRunRecord(Base):
     pause_reason: Mapped[dict] = mapped_column(JSON, default=dict)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[dict] = mapped_column(JSON, default=dict)
+    current_iteration: Mapped[int] = mapped_column(Integer, default=0)
+    source_count: Mapped[int] = mapped_column(Integer, default=0)
+    fulltext_count: Mapped[int] = mapped_column(Integer, default=0)
+    claim_count: Mapped[int] = mapped_column(Integer, default=0)
+    coverage: Mapped[int] = mapped_column(Integer, default=0)
+    counter_evidence_coverage: Mapped[int] = mapped_column(Integer, default=0)
+    model_usage: Mapped[dict] = mapped_column(JSON, default=dict)
+    stop_reason: Mapped[str] = mapped_column(String(80), default="")
+    degraded_sources: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
@@ -297,6 +306,104 @@ class NodeCheckpointRecord(Base):
     attempt_count: Mapped[int] = mapped_column(Integer, default=1)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ResearchDocumentRecord(Base):
+    __tablename__ = "research_documents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    canonical_key: Mapped[str] = mapped_column(String(700), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(500))
+    source_type: Mapped[str] = mapped_column(String(40), index=True)
+    canonical_url: Mapped[str] = mapped_column(Text)
+    bibliographic: Mapped[dict] = mapped_column(JSON, default=dict)
+    license_name: Mapped[str] = mapped_column(String(200), default="")
+    license_url: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ResearchDocumentVersionRecord(Base):
+    __tablename__ = "research_document_versions"
+    __table_args__ = (
+        UniqueConstraint("document_id", "content_hash", name="uq_document_content"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    document_id: Mapped[str] = mapped_column(ForeignKey("research_documents.id"), index=True)
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    mime_type: Mapped[str] = mapped_column(String(100), default="text/plain")
+    storage_path: Mapped[str] = mapped_column(Text, default="")
+    locator_index: Mapped[dict] = mapped_column(JSON, default=dict)
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ResearchChunkRecord(Base):
+    __tablename__ = "research_chunks"
+    __table_args__ = (
+        UniqueConstraint("version_id", "chunk_index", name="uq_version_chunk"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    version_id: Mapped[str] = mapped_column(
+        ForeignKey("research_document_versions.id"), index=True
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    locator: Mapped[str] = mapped_column(String(200))
+    text: Mapped[str] = mapped_column(Text)
+    text_hash: Mapped[str] = mapped_column(String(64), index=True)
+
+
+class ResearchClaimRecord(Base):
+    __tablename__ = "research_claims"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    claim_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    statement: Mapped[str] = mapped_column(Text)
+    claim_type: Mapped[str] = mapped_column(String(40), default="finding")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ClaimEvidenceLinkRecord(Base):
+    __tablename__ = "claim_evidence_links"
+    __table_args__ = (
+        UniqueConstraint("claim_id", "chunk_id", "stance", name="uq_claim_chunk_stance"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    claim_id: Mapped[str] = mapped_column(ForeignKey("research_claims.id"), index=True)
+    chunk_id: Mapped[str] = mapped_column(ForeignKey("research_chunks.id"), index=True)
+    stance: Mapped[str] = mapped_column(String(20), index=True)
+    excerpt_hash: Mapped[str] = mapped_column(String(64))
+    confidence: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ProjectEvidenceUseRecord(Base):
+    __tablename__ = "project_evidence_uses"
+    __table_args__ = (
+        UniqueConstraint("project_id", "claim_id", name="uq_project_claim"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("autonomous_runs.id"), index=True)
+    claim_id: Mapped[str] = mapped_column(ForeignKey("research_claims.id"), index=True)
+    assessment: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class ResearchIterationRecord(Base):
+    __tablename__ = "research_iterations"
+    __table_args__ = (
+        UniqueConstraint("run_id", "iteration", name="uq_run_iteration"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("autonomous_runs.id"), index=True)
+    iteration: Mapped[int] = mapped_column(Integer)
+    queries: Mapped[list] = mapped_column(JSON, default=list)
+    metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+    gaps: Mapped[list] = mapped_column(JSON, default=list)
+    stop_reason: Mapped[str] = mapped_column(String(80), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class ReportArtifactRecord(Base):

@@ -13,6 +13,9 @@ vi.mock('../api', () => ({
   cancelAutonomousRun: vi.fn(),
   resumeAutonomousRun: vi.fn(),
   listDatasetCandidates: vi.fn(),
+  getAutonomousResearchState: vi.fn(),
+  getAutonomousEvidenceGraph: vi.fn(),
+  reportDownloadUrl: vi.fn(() => '/report.docx'),
 }))
 
 const gateRun: AutonomousRun = {
@@ -25,6 +28,15 @@ const gateRun: AutonomousRun = {
   pause_reason: { suggested_route: 'A' },
   cancel_requested: false,
   error: {},
+  current_iteration: 2,
+  source_count: 12,
+  fulltext_count: 6,
+  claim_count: 4,
+  coverage: 80,
+  counter_evidence_coverage: 50,
+  model_usage: { total_tokens: 1200 },
+  stop_reason: 'evidence_saturated',
+  degraded_sources: [],
 }
 
 describe('AutonomousRunPanel', () => {
@@ -36,6 +48,34 @@ describe('AutonomousRunPanel', () => {
     })
     vi.mocked(api.getAutonomousRun).mockResolvedValue(gateRun)
     vi.mocked(api.listDatasetCandidates).mockResolvedValue([])
+    vi.mocked(api.getAutonomousResearchState).mockResolvedValue({
+      run_id: 'run-1',
+      limits: { max_fulltexts: 60 },
+      metrics: {
+        current_iteration: 2,
+        source_count: 12,
+        fulltext_count: 6,
+        claim_count: 4,
+        coverage: 80,
+        counter_evidence_coverage: 50,
+        model_usage: { total_tokens: 1200 },
+        stop_reason: 'evidence_saturated',
+        degraded_sources: [],
+      },
+      iterations: [],
+    })
+    vi.mocked(api.getAutonomousEvidenceGraph).mockResolvedValue({
+      claims: [{ id: 'claim-1', statement: '干预与较低焦虑相关。', claim_type: 'finding' }],
+      evidence: [{
+        id: 'e-1',
+        claim_id: 'claim-1',
+        stance: 'supports',
+        confidence: 88,
+        locator: '第 4 页',
+        excerpt: '干预组焦虑得分较低。',
+        document: { id: 'd-1', title: '开放研究', url: 'https://example.edu/paper', license_name: 'CC BY 4.0' },
+      }],
+    })
   })
 
   it('starts autonomous research and shows the human gate pause', async () => {
@@ -77,6 +117,51 @@ describe('AutonomousRunPanel', () => {
     expect(screen.getByRole('link', { name: '查看来源' })).toHaveAttribute(
       'href',
       candidate.provenance_url,
+    )
+  })
+
+  it('keeps successful dataset candidates when optional research views fail', async () => {
+    vi.mocked(api.listDatasetCandidates).mockResolvedValue([{
+      id: 'candidate-1',
+      run_id: 'run-1',
+      project_id: 'p1',
+      source: 'world_bank',
+      external_id: 'SP.POP.TOTL',
+      title: 'Population, total',
+      provenance_url: 'https://api.worldbank.org',
+      score: 90,
+      selected: true,
+      candidate_json: {},
+    }])
+    vi.mocked(api.getAutonomousResearchState).mockRejectedValue(new Error('not available'))
+    vi.mocked(api.getAutonomousEvidenceGraph).mockRejectedValue(new Error('not available'))
+
+    render(<AutonomousRunPanel projectId="p1" run={gateRun} onChanged={vi.fn()} />)
+
+    expect(await screen.findByText('World Bank')).toBeVisible()
+  })
+
+  it('shows real research metrics, evidence matrix and final report entry', async () => {
+    render(
+      <AutonomousRunPanel
+        projectId="p1"
+        run={{ ...gateRun, status: 'completed', current_node: 'completed' }}
+        onChanged={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByText('已解析全文')).toBeVisible()
+    expect(screen.getByText('6')).toBeVisible()
+
+    await userEvent.click(screen.getByRole('tab', { name: '证据矩阵' }))
+    expect(await screen.findByText('干预与较低焦虑相关。')).toBeVisible()
+    await userEvent.click(screen.getByText('干预与较低焦虑相关。'))
+    expect(await screen.findByText(/第 4 页/)).toBeVisible()
+
+    await userEvent.click(screen.getByRole('tab', { name: '最终报告' }))
+    expect(screen.getByRole('link', { name: '下载证据化报告' })).toHaveAttribute(
+      'href',
+      '/report.docx',
     )
   })
 })

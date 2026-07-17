@@ -31,26 +31,38 @@ from edusci.api.schemas import (
     ReportArtifactView,
     ReportRegenerationRequest,
 )
+from edusci.autonomy.contracts import DeepResearchLimits
 from edusci.autonomy.data_scout import DataScout
+from edusci.autonomy.deep_research import DeepResearchEngine
 from edusci.autonomy.literature import LiteratureScout
 from edusci.autonomy.orchestrator import AutonomousOrchestrator
 from edusci.autonomy.planning import ResearchPlanner
 from edusci.memory.models import (
     AutonomousRunRecord,
+    ClaimEvidenceLinkRecord,
     DatasetCandidateRecord,
     DatasetDeclarationRecord,
     DatasetRecord,
     EvidenceCard,
     FeedbackSignal,
     FlowEvent,
+    ProjectEvidenceUseRecord,
     Project,
     ReportArtifactRecord,
+    ResearchChunkRecord,
+    ResearchClaimRecord,
+    ResearchDocumentRecord,
+    ResearchDocumentVersionRecord,
+    ResearchIterationRecord,
     TaskRecord,
 )
 from edusci.reporting.docx import build_report_docx
 from edusci.services.analysis import run_analysis, save_dataset
 from edusci.services.autonomy import (
     create_autonomous_run,
+    find_active_autonomous_run,
+    find_latest_autonomous_run,
+    mark_autonomous_run_failed,
     request_cancellation,
     require_autonomous_run,
 )
@@ -65,7 +77,7 @@ from edusci.services.projects import (
 )
 from edusci.services.study import run_study_design
 from edusci.services.reporting import run_report, run_review
-from edusci.services.reporting_v2 import regenerate_report_v2
+from edusci.services.reporting_v3 import regenerate_report_v3
 from edusci.services.documents import ingest_pdf
 from edusci.tasks.dispatcher import enqueue_autonomous_run, enqueue_task
 
@@ -106,6 +118,36 @@ def autonomous_orchestrator(
 ) -> AutonomousOrchestrator:
     store = request.app.state.object_store
     resolved_config = config or {}
+    def deep_search(queries: list[str], iteration: int) -> list[dict]:
+        del iteration
+        results: list[dict] = []
+        limit = int(resolved_config.get("max_results_per_query", 10))
+        for adapter in request.app.state.literature_adapters:
+            for query in queries:
+                try:
+                    items = adapter.search(query, limit)
+                except Exception:
+                    continue
+                for item in items:
+                    results.append(
+                        {
+                            **item,
+                            "source": str(
+                                getattr(adapter, "name", adapter.__class__.__name__)
+                            ),
+                        }
+                    )
+        return results
+
+    provider = request.app.state.model_provider
+    deep_engine = None
+    if provider is not None and request.app.state.fulltext_fetcher is not None:
+        deep_engine = DeepResearchEngine(
+            session=session,
+            provider=provider,
+            search=deep_search,
+            fetch_fulltext=request.app.state.fulltext_fetcher.fetch,
+        )
     return AutonomousOrchestrator(
         session=session,
         store=store,
@@ -126,6 +168,7 @@ def autonomous_orchestrator(
             ),
         ),
         data_scout=DataScout(request.app.state.dataset_adapters, store),
+        deep_research_engine=deep_engine,
     )
 
 
@@ -158,20 +201,52 @@ def autonomous_run_start(
     project = require_project(session, project_id)
     if not request.app.state.autonomous_enabled:
         raise HTTPException(status_code=404, detail="自治研究功能未启用")
+    active_run = find_active_autonomous_run(session, project.id)
+    if active_run is not None:
+        return {
+            "task_id": active_run.task_id,
+            "run_id": active_run.id,
+            "status": active_run.status,
+        }
     config = payload.model_dump()
-    if request.app.state.task_mode == "rq":
-        run = create_autonomous_run(session, project, config, queued=True)
-        run = enqueue_autonomous_run(
-            session,
-            request.app.state.task_queue,
-            request.app.state.database_url,
-            request.app.state.storage_root,
-            run,
-            action="start",
-        )
-    else:
-        run = autonomous_orchestrator(request, session, config).start(project, config)
+    for key, value in request.app.state.deep_research_defaults.items():
+        if key not in payload.model_fields_set:
+            config[key] = value
+    run = create_autonomous_run(
+        session,
+        project,
+        config,
+        queued=request.app.state.task_mode == "rq",
+    )
+    try:
+        if request.app.state.task_mode == "rq":
+            run = enqueue_autonomous_run(
+                session,
+                request.app.state.task_queue,
+                request.app.state.database_url,
+                request.app.state.storage_root,
+                run,
+                action="start",
+            )
+        else:
+            run = autonomous_orchestrator(request, session, config).start_existing(run.id)
+    except Exception as exc:
+        run = mark_autonomous_run_failed(session, run.id, exc)
     return {"task_id": run.task_id, "run_id": run.id, "status": run.status}
+
+
+@router.get(
+    "/projects/{project_id}/autonomous-runs/latest",
+    response_model=AutonomousRunView,
+)
+def autonomous_run_latest(
+    project_id: str, session: Session = Depends(get_session)
+) -> AutonomousRunRecord:
+    require_project(session, project_id)
+    run = find_latest_autonomous_run(session, project_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="项目尚无自治研究运行记录")
+    return run
 
 
 @router.get("/autonomous-runs/{run_id}", response_model=AutonomousRunView)
@@ -179,6 +254,135 @@ def autonomous_run_get(
     run_id: str, session: Session = Depends(get_session)
 ) -> AutonomousRunRecord:
     return require_autonomous_run(session, run_id)
+
+
+@router.get("/autonomous-runs/{run_id}/research-state")
+def autonomous_research_state(
+    run_id: str, session: Session = Depends(get_session)
+) -> dict:
+    run = require_autonomous_run(session, run_id)
+    limit_fields = set(DeepResearchLimits.model_fields)
+    limits = DeepResearchLimits.model_validate(
+        {key: value for key, value in run.config.items() if key in limit_fields}
+    )
+    iterations = list(
+        session.scalars(
+            select(ResearchIterationRecord)
+            .where(ResearchIterationRecord.run_id == run.id)
+            .order_by(ResearchIterationRecord.iteration)
+        )
+    )
+    return {
+        "run_id": run.id,
+        "limits": limits.model_dump(mode="json"),
+        "metrics": {
+            "current_iteration": run.current_iteration,
+            "source_count": run.source_count,
+            "fulltext_count": run.fulltext_count,
+            "claim_count": run.claim_count,
+            "coverage": run.coverage,
+            "counter_evidence_coverage": run.counter_evidence_coverage,
+            "model_usage": run.model_usage,
+            "stop_reason": run.stop_reason,
+            "degraded_sources": run.degraded_sources,
+        },
+        "iterations": [
+            {
+                "iteration": item.iteration,
+                "queries": item.queries,
+                "metrics": item.metrics,
+                "gaps": item.gaps,
+                "stop_reason": item.stop_reason,
+            }
+            for item in iterations
+        ],
+    }
+
+
+@router.get("/autonomous-runs/{run_id}/evidence-graph")
+def autonomous_evidence_graph(
+    run_id: str, session: Session = Depends(get_session)
+) -> dict:
+    run = require_autonomous_run(session, run_id)
+    uses = list(
+        session.scalars(
+            select(ProjectEvidenceUseRecord).where(
+                ProjectEvidenceUseRecord.run_id == run.id
+            )
+        )
+    )
+    if not uses:
+        return {"claims": [], "evidence": []}
+    claim_ids = [item.claim_id for item in uses]
+    claims = list(
+        session.scalars(
+            select(ResearchClaimRecord).where(ResearchClaimRecord.id.in_(claim_ids))
+        )
+    )
+    links = list(
+        session.scalars(
+            select(ClaimEvidenceLinkRecord).where(
+                ClaimEvidenceLinkRecord.claim_id.in_(claim_ids)
+            )
+        )
+    )
+    chunk_ids = [item.chunk_id for item in links]
+    chunks = {
+        item.id: item
+        for item in session.scalars(
+            select(ResearchChunkRecord).where(ResearchChunkRecord.id.in_(chunk_ids))
+        )
+    }
+    version_ids = [item.version_id for item in chunks.values()]
+    versions = {
+        item.id: item
+        for item in session.scalars(
+            select(ResearchDocumentVersionRecord).where(
+                ResearchDocumentVersionRecord.id.in_(version_ids)
+            )
+        )
+    }
+    document_ids = [item.document_id for item in versions.values()]
+    documents = {
+        item.id: item
+        for item in session.scalars(
+            select(ResearchDocumentRecord).where(
+                ResearchDocumentRecord.id.in_(document_ids)
+            )
+        )
+    }
+    evidence = []
+    for link in links:
+        chunk = chunks[link.chunk_id]
+        version = versions[chunk.version_id]
+        document = documents[version.document_id]
+        evidence.append(
+            {
+                "id": link.id,
+                "claim_id": link.claim_id,
+                "stance": link.stance,
+                "confidence": link.confidence,
+                "locator": chunk.locator,
+                "excerpt": chunk.text,
+                "document": {
+                    "id": document.id,
+                    "title": document.title,
+                    "url": document.canonical_url,
+                    "license_name": document.license_name,
+                },
+            }
+        )
+    return {
+        "claims": [
+            {
+                "id": claim.id,
+                "statement": claim.statement,
+                "claim_type": claim.claim_type,
+            }
+            for claim in claims
+        ],
+        "evidence": evidence,
+    }
 
 
 @router.get("/autonomous-runs/{run_id}/events")
@@ -240,16 +444,22 @@ def autonomous_run_resume(
         session.add(run)
         session.commit()
     if request.app.state.task_mode == "rq":
-        run = enqueue_autonomous_run(
-            session,
-            request.app.state.task_queue,
-            request.app.state.database_url,
-            request.app.state.storage_root,
-            run,
-            action="resume",
-        )
+        try:
+            run = enqueue_autonomous_run(
+                session,
+                request.app.state.task_queue,
+                request.app.state.database_url,
+                request.app.state.storage_root,
+                run,
+                action="resume",
+            )
+        except Exception as exc:
+            run = mark_autonomous_run_failed(session, run.id, exc)
     else:
-        run = autonomous_orchestrator(request, session, run.config).resume(run.id)
+        try:
+            run = autonomous_orchestrator(request, session, run.config).resume(run.id)
+        except Exception as exc:
+            run = mark_autonomous_run_failed(session, run.id, exc)
     return {"task_id": run.task_id, "run_id": run.id, "status": run.status}
 
 
@@ -538,7 +748,7 @@ def report_regenerate(
     session.add(task)
     session.commit()
     try:
-        artifact = regenerate_report_v2(
+        artifact = regenerate_report_v3(
             session,
             project,
             refresh_evidence=payload.refresh_evidence,

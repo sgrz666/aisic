@@ -3,10 +3,12 @@ from __future__ import annotations
 import os
 import re
 import time
+from urllib.parse import urlparse
 
 import httpx
 
 from edusci.api.schemas import SourceInput
+from edusci.autonomy.deep_research import FullTextArtifact
 
 
 class _LiteratureHttpAdapter:
@@ -91,7 +93,7 @@ class SemanticScholarLiteratureAdapter(_LiteratureHttpAdapter):
 
     _fields = (
         "paperId,title,url,abstract,year,authors,externalIds,citationCount,"
-        "fieldsOfStudy,publicationDate,venue,journal"
+        "fieldsOfStudy,publicationDate,venue,journal,openAccessPdf"
     )
 
     def __init__(
@@ -126,6 +128,7 @@ class SemanticScholarLiteratureAdapter(_LiteratureHttpAdapter):
 
     def _normalize(self, item: dict) -> dict:
         external = item.get("externalIds") or {}
+        open_access = item.get("openAccessPdf") or {}
         doi = str(external.get("DOI") or "").lower()
         return {
             "source_id": str(item.get("paperId") or doi or item.get("url") or ""),
@@ -136,12 +139,72 @@ class SemanticScholarLiteratureAdapter(_LiteratureHttpAdapter):
             "year": item.get("year"),
             "url": item.get("url") or (f"https://doi.org/{doi}" if doi else ""),
             "license_url": "",
+            "license_name": str(open_access.get("license") or ""),
+            "open_access_url": str(open_access.get("url") or ""),
             "citation_count": int(item.get("citationCount") or 0),
             "source_title": (item.get("journal") or {}).get("name") or item.get("venue") or "",
             "volume": (item.get("journal") or {}).get("volume") or "",
             "pages": (item.get("journal") or {}).get("pages") or "",
             "reference_type": "J",
         }
+
+
+class OpenAccessFullTextFetcher:
+    """Download only explicitly open or trusted-authority full text."""
+
+    trusted_hosts = (
+        "arxiv.org",
+        "worldbank.org",
+        "unesco.org",
+        "unicef.org",
+        "oecd.org",
+        ".gov",
+        ".gov.cn",
+        ".edu",
+        ".edu.cn",
+    )
+
+    def __init__(self, client: httpx.Client, max_size_bytes: int = 50 * 1024 * 1024) -> None:
+        self.client = client
+        self.max_size_bytes = max_size_bytes
+
+    @classmethod
+    def _trusted(cls, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return any(host == suffix or host.endswith(suffix) for suffix in cls.trusted_hosts)
+
+    @staticmethod
+    def _licensed(candidate: dict) -> bool:
+        value = " ".join(
+            (
+                str(candidate.get("license_name") or ""),
+                str(candidate.get("license_url") or ""),
+            )
+        ).lower()
+        return any(
+            marker in value
+            for marker in ("cc by", "creative commons", "public domain", "cc0")
+        )
+
+    def fetch(self, candidate: dict) -> FullTextArtifact | None:
+        url = str(candidate.get("open_access_url") or "").strip()
+        if not url or not (self._licensed(candidate) or self._trusted(url)):
+            return None
+        response = self.client.get(url, follow_redirects=True)
+        response.raise_for_status()
+        declared_size = int(response.headers.get("content-length") or 0)
+        if declared_size > self.max_size_bytes or len(response.content) > self.max_size_bytes:
+            raise ValueError("开放全文超过下载大小限制")
+        mime_type = response.headers.get("content-type", "").split(";", 1)[0].strip()
+        if not mime_type:
+            mime_type = "application/pdf" if urlparse(url).path.endswith(".pdf") else "text/html"
+        return FullTextArtifact(
+            url=str(response.url),
+            mime_type=mime_type,
+            content=response.content,
+            license_name=str(candidate.get("license_name") or ""),
+            license_url=str(candidate.get("license_url") or ""),
+        )
 
 
 class OpenResearchRetriever:

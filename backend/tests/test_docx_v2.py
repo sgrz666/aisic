@@ -45,3 +45,45 @@ def test_v2_docx_has_a4_academic_structure_tables_and_appendix() -> None:
     assert "AI焦虑" in " ".join(cell.text for table in document.tables for row in table.rows for cell in row.cells)
     assert "科学假设与研究计划" in section.header.paragraphs[0].text
     assert "WARN" in section.footer.paragraphs[0].text
+
+
+def test_v3_docx_includes_located_evidence_matrix() -> None:
+    report = valid_report_payload()
+    report.update(
+        {
+            "schema_version": 3,
+            "research_methodology": {"iterations": 3, "fulltexts_parsed": 12},
+            "conclusions": [
+                {
+                    "claim_id": "claim-1",
+                    "statement": "干预与较低焦虑相关。",
+                    "confidence": "moderate",
+                    "evidence_ids": ["e-1"],
+                }
+            ],
+            "conflicting_evidence": [],
+            "evidence_ledger": [
+                {
+                    "evidence_id": "e-1",
+                    "claim_id": "claim-1",
+                    "stance": "supports",
+                    "locator": "第 4 页",
+                    "excerpt": "干预组焦虑得分较低。",
+                    "document_title": "开放研究",
+                    "source_url": "https://example.edu/paper",
+                }
+            ],
+            "restricted": False,
+        }
+    )
+
+    content = build_report_docx(report, {"overall": "PASS", "checks": {}}, "final")
+    document = Document(BytesIO(content))
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    table_text = " ".join(
+        cell.text for table in document.tables for row in table.rows for cell in row.cells
+    )
+
+    assert "证据矩阵" in text
+    assert "第 4 页" in table_text
+    assert "干预与较低焦虑相关" in table_text

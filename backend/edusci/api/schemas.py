@@ -131,6 +131,14 @@ class FeedbackSignalView(BaseModel):
 class AutonomousRunCreate(BaseModel):
     max_literature_rounds: int = Field(default=3, ge=1, le=3)
     max_results_per_query: int = Field(default=10, ge=1, le=50)
+    depth_mode: Literal["adaptive_deep", "fixed"] = "adaptive_deep"
+    initial_rounds: int = Field(default=5, ge=1, le=10)
+    max_rounds: int = Field(default=10, ge=1, le=10)
+    initial_fulltexts: int = Field(default=20, ge=1, le=60)
+    max_fulltexts: int = Field(default=60, ge=1, le=60)
+    soft_timeout_minutes: int = Field(default=60, ge=5, le=120)
+    hard_timeout_minutes: int = Field(default=120, ge=5, le=120)
+    require_route_confirmation: bool = False
 
 
 class AutonomousRunRef(BaseModel):
@@ -151,6 +159,15 @@ class AutonomousRunView(BaseModel):
     pause_reason: dict
     cancel_requested: bool
     error: dict
+    current_iteration: int
+    source_count: int
+    fulltext_count: int
+    claim_count: int
+    coverage: int
+    counter_evidence_coverage: int
+    model_usage: dict
+    stop_reason: str
+    degraded_sources: list
 
 
 class DatasetCandidateView(BaseModel):

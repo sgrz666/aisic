@@ -7,7 +7,9 @@ function Assert-CommandSucceeded([string]$Name) {
 
 Push-Location (Join-Path $Root "backend")
 try {
-  & ".\.venv\Scripts\python.exe" -m pytest tests -q
+  & ".\.venv\Scripts\python.exe" -m ruff check edusci tests
+  Assert-CommandSucceeded "Backend lint"
+  & ".\.venv\Scripts\python.exe" -m pytest tests -q --cov=edusci --cov-report=term-missing:skip-covered --cov-fail-under=85 -W error::ResourceWarning -W error::pytest.PytestUnraisableExceptionWarning
   Assert-CommandSucceeded "Backend tests"
 } finally { Pop-Location }
 

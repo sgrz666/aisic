@@ -55,7 +55,8 @@ def test_rq_autonomous_job_reaches_same_gate(monkeypatch, tmp_path):
             json={"title": "RQ 自治研究", "idea_text": "人口变化对教育资源配置的影响"},
         ).json()["id"]
         queued = client.post(
-            f"/api/v1/projects/{project_id}/autonomous-runs", json={}
+            f"/api/v1/projects/{project_id}/autonomous-runs",
+            json={"require_route_confirmation": True},
         )
         assert queued.status_code == 202
         assert queued.json()["status"] == "queued"

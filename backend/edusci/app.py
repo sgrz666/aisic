@@ -5,10 +5,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from redis import Redis
 from rq import Queue
+from sqlalchemy import text
 
 from edusci.api.routes import router
 from edusci.analysis.storage import LocalObjectStore
@@ -16,6 +17,7 @@ from edusci.integrations.qwen import QwenProvider
 from edusci.integrations.datasets import default_dataset_adapters
 from edusci.integrations.retrieval import (
     CrossrefLiteratureAdapter,
+    OpenAccessFullTextFetcher,
     OpenResearchRetriever,
     SemanticScholarLiteratureAdapter,
 )
@@ -30,6 +32,7 @@ def create_app(
     task_queue=None,
     literature_adapters=None,
     dataset_adapters=None,
+    fulltext_fetcher=None,
 ) -> FastAPI:
     resolved_database = database_url or os.getenv(
         "DATABASE_URL", "sqlite+pysqlite:///./data/edusci.db"
@@ -42,8 +45,8 @@ def create_app(
             base_url=os.getenv(
                 "QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
             ),
-            generation_model=os.getenv("QWEN_GENERATION_MODEL", "qwen-plus"),
-            review_model=os.getenv("QWEN_REVIEW_MODEL", "qwen-max"),
+            generation_model=os.getenv("QWEN_GENERATION_MODEL", "qwen3.7-plus"),
+            review_model=os.getenv("QWEN_REVIEW_MODEL", "qwen3.7-max"),
         )
 
     resolved_task_mode = task_mode or os.getenv("TASK_MODE", "inline")
@@ -54,6 +57,7 @@ def create_app(
         if resolved_database.startswith("sqlite"):
             os.makedirs("data", exist_ok=True)
         app.state.session_factory = build_session_factory(resolved_database)
+        app.state.database_engine = app.state.session_factory.kw["bind"]
         app.state.database_url = resolved_database
         app.state.task_mode = resolved_task_mode
         app.state.storage_root = resolved_storage_root
@@ -72,6 +76,18 @@ def create_app(
         app.state.autonomous_max_results_per_query = int(
             os.getenv("AUTONOMOUS_MAX_RESULTS_PER_QUERY", "10")
         )
+        app.state.deep_research_defaults = {
+            "initial_rounds": int(os.getenv("AUTONOMOUS_INITIAL_ROUNDS", "5")),
+            "max_rounds": int(os.getenv("AUTONOMOUS_MAX_ROUNDS", "10")),
+            "initial_fulltexts": int(os.getenv("AUTONOMOUS_INITIAL_FULLTEXTS", "20")),
+            "max_fulltexts": int(os.getenv("AUTONOMOUS_MAX_FULLTEXTS", "60")),
+            "soft_timeout_minutes": int(
+                os.getenv("AUTONOMOUS_SOFT_TIMEOUT_MINUTES", "60")
+            ),
+            "hard_timeout_minutes": int(
+                os.getenv("AUTONOMOUS_HARD_TIMEOUT_MINUTES", "120")
+            ),
+        }
         download_limit = int(os.getenv("AUTONOMOUS_DOWNLOAD_LIMIT_MB", "50"))
         shared_client = None
         if literature_adapters is None or dataset_adapters is None:
@@ -96,6 +112,19 @@ def create_app(
         app.state.dataset_adapters = dataset_adapters or default_dataset_adapters(
             shared_client
         )
+        fulltext_client = None
+        if fulltext_fetcher is None:
+            fulltext_client = shared_client or httpx.Client(
+                timeout=60,
+                follow_redirects=True,
+                headers={"User-Agent": "EduSci-MVP/0.3"},
+            )
+            app.state.fulltext_fetcher = OpenAccessFullTextFetcher(
+                fulltext_client,
+                max_size_bytes=download_limit * 1024 * 1024,
+            )
+        else:
+            app.state.fulltext_fetcher = fulltext_fetcher
         for adapter in app.state.dataset_adapters:
             if hasattr(adapter, "max_size_bytes"):
                 adapter.max_size_bytes = download_limit * 1024 * 1024
@@ -104,11 +133,16 @@ def create_app(
             if os.getenv("ENABLE_LIVE_RETRIEVAL", "false").lower() == "true"
             else None
         )
-        yield
-        if shared_client is not None:
-            shared_client.close()
-        if semantic_adapter is not None and semantic_adapter.client is not shared_client:
-            semantic_adapter.client.close()
+        try:
+            yield
+        finally:
+            if shared_client is not None:
+                shared_client.close()
+            if semantic_adapter is not None and semantic_adapter.client is not shared_client:
+                semantic_adapter.client.close()
+            if fulltext_client is not None and fulltext_client is not shared_client:
+                fulltext_client.close()
+            app.state.database_engine.dispose()
 
     app = FastAPI(
         title="教育智研 API",
@@ -127,6 +161,23 @@ def create_app(
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "edusci-api"}
+
+    @app.get("/health/ready")
+    def readiness() -> dict[str, str]:
+        try:
+            with app.state.database_engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"status": "not_ready", "database": "unavailable"},
+            ) from exc
+        return {
+            "status": "ready",
+            "database": "ok",
+            "model_provider": "configured" if resolved_provider is not None else "fallback",
+            "task_mode": resolved_task_mode,
+        }
 
     app.include_router(router)
     return app

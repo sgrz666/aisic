@@ -77,7 +77,7 @@ class ReportComposer:
         ]
         for attempt in range(3):
             try:
-                payload = model_provider.complete_json("generation", messages)
+                payload = model_provider.complete_json("synthesis", messages)
                 candidate = self._merge_narrative(trusted_report, payload)
                 return self._validate_with_compatibility(candidate)
             except Exception as exc:

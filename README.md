@@ -105,8 +105,8 @@ powershell -ExecutionPolicy Bypass -File scripts\stop.ps1
 
 ```dotenv
 DASHSCOPE_API_KEY=你的百炼_API_Key
-QWEN_GENERATION_MODEL=qwen-plus
-QWEN_REVIEW_MODEL=qwen-max
+QWEN_GENERATION_MODEL=qwen3.7-plus
+QWEN_REVIEW_MODEL=qwen3.7-max
 ENABLE_LIVE_RETRIEVAL=true
 ```
 
@@ -114,9 +114,9 @@ ENABLE_LIVE_RETRIEVAL=true
 
 ### 一键自治研究
 
-进入项目后点击“启动自动研究”。系统会按以下顺序运行：研究规划 → Crossref/Semantic Scholar 文献检索 → World Bank/UNICEF/UNESCO UIS/教育部数据检索 → 证据和许可校验 → 路径建议。
+进入项目后点击“启动自动研究”。系统会按以下顺序运行：研究规划 → 多轮文献检索 → 合法开放全文解析 → 观点与反证提取 → 证据缺口迭代 → 官方数据检索 → 路径自动选择 → 报告 v3 → 独立复审。
 
-- 到 A/B/C/D 路径门禁时必须由你确认。
+- 系统默认自动采用确定性门禁建议；仅在许可、伦理、隐私风险或必须等待真实数据时暂停。
 - A 使用通过许可、来源和 PII 检查的开放数据运行受控统计。
 - B 生成问卷后等待真实回收数据；上传 CSV/XLSX 后自动恢复。
 - C 只做理论证据综合，不生成统计结果。
@@ -131,6 +131,12 @@ SEMANTIC_SCHOLAR_API_KEY=
 AUTONOMOUS_MAX_LITERATURE_ROUNDS=3
 AUTONOMOUS_MAX_RESULTS_PER_QUERY=10
 AUTONOMOUS_DOWNLOAD_LIMIT_MB=50
+AUTONOMOUS_INITIAL_ROUNDS=5
+AUTONOMOUS_MAX_ROUNDS=10
+AUTONOMOUS_INITIAL_FULLTEXTS=20
+AUTONOMOUS_MAX_FULLTEXTS=60
+AUTONOMOUS_SOFT_TIMEOUT_MINUTES=60
+AUTONOMOUS_HARD_TIMEOUT_MINUTES=120
 ```
 
 真实 `DASHSCOPE_API_KEY` 只能写入本地 `.env`，不要写入 `.env.example` 或提交到 Git。

@@ -7,14 +7,14 @@ from sqlalchemy.orm import Session
 from edusci.domain.flow import FlowStage, transition_stage
 from edusci.memory.models import Project, TaskRecord
 from edusci.services.projects import _task
-from edusci.services.reporting_v2 import regenerate_report_v2
+from edusci.services.reporting_v3 import regenerate_report_v3
 
 
 def run_report(session: Session, project: Project, task: TaskRecord | None = None):
     def build() -> None:
         if project.stage != FlowStage.REPORT.value:
             raise ValueError("当前阶段不能生成研究计划")
-        regenerate_report_v2(session, project, refresh_evidence=False)
+        regenerate_report_v3(session, project, refresh_evidence=False)
         if project.report["results"]["kind"] == "expected_only":
             report = dict(project.report)
             report["results"] = {**report["results"], "未采集真实数据": True}
@@ -33,7 +33,7 @@ def run_review(
     def review() -> None:
         if project.stage != FlowStage.REVIEW.value:
             raise ValueError("当前阶段不能执行复审")
-        if project.report.get("schema_version") == 2:
+        if project.report.get("schema_version", 0) >= 2:
             deterministic = project.review or {}
             agent_review = {"status": "not_configured"}
             if model_provider is not None:

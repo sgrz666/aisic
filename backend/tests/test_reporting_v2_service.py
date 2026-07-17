@@ -5,10 +5,22 @@ from sqlalchemy import select
 
 from edusci.api.schemas import ProjectCreate, SourceInput
 from edusci.app import create_app
-from edusci.memory.models import KnowledgeEntity, Project, ReportArtifactRecord
+from edusci.memory.models import (
+    AutonomousRunRecord,
+    ClaimEvidenceLinkRecord,
+    KnowledgeEntity,
+    Project,
+    ProjectEvidenceUseRecord,
+    ReportArtifactRecord,
+    ResearchChunkRecord,
+    ResearchClaimRecord,
+    ResearchDocumentRecord,
+    ResearchDocumentVersionRecord,
+)
 from edusci.services.analysis import save_dataset
 from edusci.services.projects import create_project, run_evidence_build, run_idea_parse
 from edusci.services.reporting_v2 import regenerate_report_v2
+from edusci.services.reporting_v3 import regenerate_report_v3
 from edusci.autonomy.literature import LiteratureScout
 from edusci.autonomy.planning import ResearchPlanner
 from tests.autonomy_fakes import FakeLiteratureAdapter
@@ -104,6 +116,108 @@ def test_regeneration_preserves_legacy_version_and_marks_simulation(tmp_path: Pa
             assert artifact.review_json["checks"]["construct_alignment"]["status"] == "WARN"
 
 
+def test_report_v3_only_promotes_claims_with_located_evidence(tmp_path: Path) -> None:
+    app = create_app(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'v3.db').as_posix()}",
+        storage_root=tmp_path / "files",
+        task_mode="inline",
+    )
+    with TestClient(app):
+        project_id = _completed_legacy_project(app, tmp_path)
+        with app.state.session_factory() as session:
+            project = session.get(Project, project_id)
+            run = AutonomousRunRecord(
+                project_id=project_id,
+                status="generating_report",
+                current_iteration=2,
+                source_count=4,
+                fulltext_count=2,
+                claim_count=2,
+                coverage=100,
+                counter_evidence_coverage=50,
+                stop_reason="evidence_saturated",
+            )
+            session.add(run)
+            session.flush()
+            document = ResearchDocumentRecord(
+                canonical_key="doi:10.1/deep",
+                title="Located evidence",
+                source_type="scholarly",
+                canonical_url="https://doi.org/10.1/deep",
+                license_name="CC BY 4.0",
+            )
+            session.add(document)
+            session.flush()
+            version = ResearchDocumentVersionRecord(
+                document_id=document.id,
+                content_hash="a" * 64,
+                mime_type="application/pdf",
+                storage_path="https://example.edu/deep.pdf",
+            )
+            session.add(version)
+            session.flush()
+            chunk = ResearchChunkRecord(
+                version_id=version.id,
+                chunk_index=0,
+                locator="第 4 页",
+                text="Population change affects education resource allocation.",
+                text_hash="b" * 64,
+            )
+            supported = ResearchClaimRecord(
+                claim_hash="c" * 64,
+                statement="Population change affects education resource allocation.",
+            )
+            unsupported = ResearchClaimRecord(
+                claim_hash="d" * 64,
+                statement="This unsupported claim must not enter conclusions.",
+            )
+            session.add_all([chunk, supported, unsupported])
+            session.flush()
+            link = ClaimEvidenceLinkRecord(
+                claim_id=supported.id,
+                chunk_id=chunk.id,
+                stance="supports",
+                excerpt_hash=chunk.text_hash,
+                confidence=92,
+            )
+            session.add_all(
+                [
+                    link,
+                    ProjectEvidenceUseRecord(
+                        project_id=project_id,
+                        run_id=run.id,
+                        claim_id=supported.id,
+                        assessment={"status": "accepted"},
+                    ),
+                    ProjectEvidenceUseRecord(
+                        project_id=project_id,
+                        run_id=run.id,
+                        claim_id=unsupported.id,
+                        assessment={"status": "candidate"},
+                    ),
+                ]
+            )
+            session.commit()
+
+            artifact = regenerate_report_v3(session, project, refresh_evidence=False)
+
+            assert artifact.schema_version == 3
+            report = artifact.report_json
+            assert report["schema_version"] == 3
+            assert report["research_methodology"]["iterations"] == 2
+            assert report["conclusions"] == [
+                {
+                    "claim_id": supported.id,
+                    "statement": supported.statement,
+                    "confidence": "moderate",
+                    "evidence_ids": [link.id],
+                }
+            ]
+            assert report["restricted"] is False
+            assert report["evidence_ledger"][0]["locator"] == "第 4 页"
+            assert artifact.review_json["checks"]["claim_grounding"]["status"] == "PASS"
+
+
 def test_report_regeneration_api_and_dataset_provenance(tmp_path: Path) -> None:
     app = create_app(
         database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-v2.db').as_posix()}",
@@ -127,7 +241,7 @@ def test_report_regeneration_api_and_dataset_provenance(tmp_path: Path) -> None:
         assert regenerated.status_code == 202
         artifacts = client.get(f"/api/v1/projects/{project_id}/report-artifacts")
         assert artifacts.status_code == 200
-        assert artifacts.json()[-1]["schema_version"] == 2
+        assert artifacts.json()[-1]["schema_version"] == 3
 
 
 def test_regeneration_formats_stored_bibliography_as_gbt_7714(tmp_path: Path) -> None:

@@ -27,6 +27,32 @@ class AutonomousStatus(StrEnum):
     COMPLETED = "completed"
 
 
+class EvidenceStance(StrEnum):
+    SUPPORTS = "supports"
+    COUNTER = "counter"
+    QUALIFIES = "qualifies"
+
+
+class DeepResearchLimits(BaseModel):
+    depth_mode: Literal["adaptive_deep", "fixed"] = "adaptive_deep"
+    initial_rounds: int = Field(default=5, ge=1, le=10)
+    max_rounds: int = Field(default=10, ge=1, le=10)
+    initial_fulltexts: int = Field(default=20, ge=1, le=60)
+    max_fulltexts: int = Field(default=60, ge=1, le=60)
+    soft_timeout_minutes: int = Field(default=60, ge=5, le=120)
+    hard_timeout_minutes: int = Field(default=120, ge=5, le=120)
+
+    @model_validator(mode="after")
+    def ordered_budgets(self) -> DeepResearchLimits:
+        if (
+            self.initial_rounds > self.max_rounds
+            or self.initial_fulltexts > self.max_fulltexts
+            or self.soft_timeout_minutes > self.hard_timeout_minutes
+        ):
+            raise ValueError("初始预算不能超过最大预算")
+        return self
+
+
 class VariableSpec(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     aliases_zh: list[str] = Field(default_factory=list)

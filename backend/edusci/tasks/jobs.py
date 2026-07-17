@@ -3,11 +3,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import httpx
 from sqlalchemy import select
 
 from edusci.analysis.storage import LocalObjectStore
 from edusci.api.schemas import SourceInput
 from edusci.autonomy.data_scout import DataScout
+from edusci.autonomy.deep_research import DeepResearchEngine
 from edusci.autonomy.literature import LiteratureScout
 from edusci.autonomy.orchestrator import AutonomousOrchestrator
 from edusci.autonomy.planning import ResearchPlanner
@@ -15,10 +17,11 @@ from edusci.integrations.datasets import default_dataset_adapters
 from edusci.integrations.qwen import QwenProvider
 from edusci.integrations.retrieval import (
     CrossrefLiteratureAdapter,
+    OpenAccessFullTextFetcher,
     OpenResearchRetriever,
     SemanticScholarLiteratureAdapter,
 )
-from edusci.memory.database import build_session_factory
+from edusci.memory.database import managed_session
 from edusci.memory.models import AutonomousRunRecord, DatasetRecord, Project, TaskRecord
 from edusci.services.analysis import run_analysis
 from edusci.services.projects import run_evidence_build, run_gate, run_idea_parse
@@ -35,8 +38,8 @@ def _provider():
         base_url=os.getenv(
             "QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
         ),
-        generation_model=os.getenv("QWEN_GENERATION_MODEL", "qwen-plus"),
-        review_model=os.getenv("QWEN_REVIEW_MODEL", "qwen-max"),
+        generation_model=os.getenv("QWEN_GENERATION_MODEL", "qwen3.7-plus"),
+        review_model=os.getenv("QWEN_REVIEW_MODEL", "qwen3.7-max"),
     )
 
 
@@ -51,24 +54,59 @@ def execute_autonomous_run(
     action: str = "start",
     dataset_id: str | None = None,
 ) -> None:
-    session_factory = build_session_factory(database_url)
-    with session_factory() as session:
+    with managed_session(database_url) as session:
         store = LocalObjectStore(Path(storage_root))
         run = session.get(AutonomousRunRecord, run_id)
         if run is None:
             raise ValueError("自治研究任务不存在")
         config = run.config or {}
         dataset_adapters = default_dataset_adapters()
+        literature_adapters = default_literature_adapters()
+        provider = _provider()
         download_limit = int(os.getenv("AUTONOMOUS_DOWNLOAD_LIMIT_MB", "50"))
         for adapter in dataset_adapters:
             if hasattr(adapter, "max_size_bytes"):
                 adapter.max_size_bytes = download_limit * 1024 * 1024
+        fulltext_client = httpx.Client(
+            timeout=60,
+            follow_redirects=True,
+            headers={"User-Agent": "EduSci-MVP/0.3"},
+        )
+
+        def deep_search(queries: list[str], iteration: int) -> list[dict]:
+            del iteration
+            results: list[dict] = []
+            limit = int(config.get("max_results_per_query", 10))
+            for adapter in literature_adapters:
+                for query in queries:
+                    try:
+                        items = adapter.search(query, limit)
+                    except Exception:
+                        continue
+                    results.extend(
+                        {**item, "source": getattr(adapter, "name", "literature")}
+                        for item in items
+                    )
+            return results
+
+        deep_engine = None
+        if provider is not None:
+            fetcher = OpenAccessFullTextFetcher(
+                fulltext_client,
+                max_size_bytes=download_limit * 1024 * 1024,
+            )
+            deep_engine = DeepResearchEngine(
+                session=session,
+                provider=provider,
+                search=deep_search,
+                fetch_fulltext=fetcher.fetch,
+            )
         orchestrator = AutonomousOrchestrator(
             session=session,
             store=store,
-            planner=ResearchPlanner(_provider()),
+            planner=ResearchPlanner(provider),
             literature_scout=LiteratureScout(
-                default_literature_adapters(),
+                literature_adapters,
                 max_rounds=int(
                     config.get(
                         "max_literature_rounds",
@@ -83,20 +121,23 @@ def execute_autonomous_run(
                 ),
             ),
             data_scout=DataScout(dataset_adapters, store),
+            deep_research_engine=deep_engine,
         )
-        if action == "start":
-            orchestrator.start_existing(run_id)
-        elif action == "real_data":
-            if not dataset_id:
-                raise ValueError("真实数据恢复任务缺少 dataset_id")
-            orchestrator.resume_after_real_data(run_id, dataset_id)
-        else:
-            orchestrator.resume(run_id)
+        try:
+            if action == "start":
+                orchestrator.start_existing(run_id)
+            elif action == "real_data":
+                if not dataset_id:
+                    raise ValueError("真实数据恢复任务缺少 dataset_id")
+                orchestrator.resume_after_real_data(run_id, dataset_id)
+            else:
+                orchestrator.resume(run_id)
+        finally:
+            fulltext_client.close()
 
 
 def execute_task(task_id: str, database_url: str, storage_root: str) -> None:
-    session_factory = build_session_factory(database_url)
-    with session_factory() as session:
+    with managed_session(database_url) as session:
         task = session.get(TaskRecord, task_id)
         if task is None or task.status == "canceled":
             return

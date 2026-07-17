@@ -2,6 +2,8 @@ import type {
   AutonomousRun,
   AutonomousRunRef,
   DatasetCandidate,
+  AutonomousResearchState,
+  EvidenceGraph,
   EvidenceCard,
   Project,
   ResearchRoute,
@@ -126,3 +128,11 @@ export const listDatasetCandidates = (runId: string) =>
   request<DatasetCandidate[]>(
     `/api/v1/autonomous-runs/${runId}/dataset-candidates`,
   )
+
+export const getAutonomousResearchState = (runId: string) =>
+  request<AutonomousResearchState>(
+    `/api/v1/autonomous-runs/${runId}/research-state`,
+  )
+
+export const getAutonomousEvidenceGraph = (runId: string) =>
+  request<EvidenceGraph>(`/api/v1/autonomous-runs/${runId}/evidence-graph`)
