@@ -5,6 +5,9 @@ function Assert-CommandSucceeded([string]$Name) {
   if ($LASTEXITCODE -ne 0) { throw "$Name failed with exit code $LASTEXITCODE" }
 }
 
+& (Join-Path $PSScriptRoot "security-check.ps1") -Root $Root
+Assert-CommandSucceeded "Repository security scan"
+
 Push-Location (Join-Path $Root "backend")
 try {
   & ".\.venv\Scripts\python.exe" -m ruff check edusci tests
