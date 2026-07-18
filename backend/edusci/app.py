@@ -47,6 +47,10 @@ def create_app(
             ),
             generation_model=os.getenv("QWEN_GENERATION_MODEL", "qwen3.7-plus"),
             review_model=os.getenv("QWEN_REVIEW_MODEL", "qwen3.7-max"),
+            embedding_model=os.getenv(
+                "QWEN_EMBEDDING_MODEL", "text-embedding-v4"
+            ),
+            embedding_dimension=int(os.getenv("QWEN_EMBEDDING_DIMENSION", "1024")),
         )
 
     resolved_task_mode = task_mode or os.getenv("TASK_MODE", "inline")

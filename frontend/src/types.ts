@@ -158,6 +158,8 @@ export interface AutonomousRun {
   model_usage?: Record<string, number>
   stop_reason?: string
   degraded_sources?: string[]
+  quality_metrics?: Record<string, number>
+  quality_gate_status?: 'PASS' | 'LIMITED' | 'PENDING'
 }
 
 export interface ResearchIteration {
@@ -181,6 +183,14 @@ export interface AutonomousResearchState {
     model_usage: Record<string, number>
     stop_reason: string
     degraded_sources: string[]
+    quality_gate_status?: 'PASS' | 'LIMITED' | 'PENDING'
+    subquestion_coverage?: number
+    independent_source_coverage?: number
+    counter_search_coverage?: number
+    counter_found_coverage?: number
+    grounding_pass_rate?: number
+    validated_evidence_count?: number
+    accepted_claim_count?: number
   }
   iterations: ResearchIteration[]
 }
@@ -189,6 +199,15 @@ export interface EvidenceGraphClaim {
   id: string
   statement: string
   claim_type: string
+  subquestion_ids?: string[]
+}
+
+export interface EvidenceGraphSubquestion {
+  id: string
+  ordinal: number
+  question: string
+  required: boolean
+  status: string
 }
 
 export interface EvidenceGraphItem {
@@ -198,6 +217,10 @@ export interface EvidenceGraphItem {
   confidence: number
   locator: string
   excerpt: string
+  validation_status?: 'validated' | 'rejected' | 'unverified' | 'candidate'
+  entailment_score?: number
+  validator_model?: string
+  independent_group?: string
   document: {
     id: string
     title: string
@@ -209,6 +232,7 @@ export interface EvidenceGraphItem {
 export interface EvidenceGraph {
   claims: EvidenceGraphClaim[]
   evidence: EvidenceGraphItem[]
+  subquestions?: EvidenceGraphSubquestion[]
 }
 
 export interface AutonomousEvent {

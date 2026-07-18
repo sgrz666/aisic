@@ -32,6 +32,7 @@ try {
   }
 
   Write-Output "Security scan passed: tracked files and Git history contain no credential-like values."
+  $global:LASTEXITCODE = 0
 } finally {
   Pop-Location
 }

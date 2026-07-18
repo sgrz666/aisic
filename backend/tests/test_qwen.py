@@ -2,8 +2,10 @@ import json
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 
+from edusci.app import create_app
 from edusci.integrations.qwen import QwenConfigurationError, QwenProvider
 
 
@@ -139,3 +141,122 @@ def test_qwen_repairs_json_that_fails_the_requested_schema() -> None:
 
     assert result == {"coverage": 88}
     assert attempts == 2
+
+
+def test_qwen_embeddings_use_configured_model_dimension_and_track_usage() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": 0, "embedding": [1.0, 0.0, 0.0]},
+                    {"index": 1, "embedding": [0.0, 1.0, 0.0]},
+                ],
+                "usage": {"total_tokens": 7},
+            },
+        )
+
+    provider = QwenProvider(
+        api_key="test-key",
+        embedding_model="text-embedding-v4",
+        embedding_dimension=3,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    vectors = provider.embed(["研究问题", "research question"])
+
+    payload = json.loads(requests[0].content)
+    assert requests[0].url.path.endswith("/compatible-mode/v1/embeddings")
+    assert payload == {
+        "model": "text-embedding-v4",
+        "input": ["研究问题", "research question"],
+        "dimensions": 3,
+    }
+    assert vectors == [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+    assert provider.usage["requests"] == 1
+    assert provider.usage["total_tokens"] == 7
+
+
+def test_qwen_embeddings_reject_an_invalid_vector_dimension() -> None:
+    provider = QwenProvider(
+        api_key="test-key",
+        embedding_dimension=3,
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _: httpx.Response(
+                    200,
+                    json={"data": [{"index": 0, "embedding": [1.0, 0.0]}]},
+                )
+            )
+        ),
+    )
+
+    with pytest.raises(ValueError, match="向量维度"):
+        provider.embed(["dimension mismatch"])
+
+
+def test_app_reads_qwen_embedding_configuration(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
+    monkeypatch.setenv("QWEN_EMBEDDING_MODEL", "text-embedding-test")
+    monkeypatch.setenv("QWEN_EMBEDDING_DIMENSION", "768")
+
+    app = create_app(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'app.db').as_posix()}",
+        literature_adapters=[],
+        dataset_adapters=[],
+    )
+
+    with TestClient(app):
+        provider = app.state.model_provider
+        assert provider.embedding_model == "text-embedding-test"
+        assert provider.embedding_dimension == 768
+
+
+def test_qwen_evidence_verifier_uses_a_strict_schema() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "status": "validated",
+                                    "stance": "supports",
+                                    "entailment_score": 91,
+                                    "reason": "The excerpt directly states the claim.",
+                                }
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    provider = QwenProvider(
+        api_key="test-key",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = provider.verify_evidence(
+        statement="The intervention reduced anxiety.",
+        excerpt="Students reported lower anxiety after the intervention.",
+        stance="supports",
+    )
+
+    payload = json.loads(requests[0].content)
+    assert payload["model"] == "qwen3.7-plus"
+    assert payload["response_format"] == {"type": "json_object"}
+    assert result == {
+        "status": "validated",
+        "stance": "supports",
+        "entailment_score": 91,
+        "reason": "The excerpt directly states the claim.",
+    }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 from typing import Sequence
 
@@ -18,6 +19,7 @@ from edusci.evaluation.contracts import (
     QualityReport,
     QualitySuite,
 )
+from edusci.integrations.qwen import QwenProvider
 
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "research_quality_v1.json"
@@ -250,14 +252,87 @@ def evaluate_predictions(
     )
 
 
+def run_quality_evaluation(
+    suite: QualitySuite,
+    *,
+    mode: str = "offline",
+    provider=None,
+) -> QualityReport:
+    if mode == "offline":
+        predictions = [
+            QualityPrediction.model_validate(case.frozen_prediction)
+            for case in suite.cases
+        ]
+    elif mode == "live-qwen":
+        if provider is None:
+            raise ValueError("live-qwen mode requires a configured Qwen provider")
+        predictions = []
+        for case in suite.cases:
+            payload = {
+                "case_id": case.id,
+                "question": case.question,
+                "subquestions": case.subquestions,
+                "documents": [item.model_dump(mode="json") for item in case.documents],
+                "instructions": (
+                    "Rank documents, extract only exact verbatim evidence, classify stance, "
+                    "execute counter-evidence analysis, and restrict conclusions when evidence "
+                    "cannot support them. Return only the requested JSON schema."
+                ),
+            }
+            prediction = provider.complete_json(
+                "extractor",
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Evaluate this research case using only the supplied documents. "
+                            "Never invent excerpts, sources, or conclusions."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(payload, ensure_ascii=False),
+                    },
+                ],
+                schema=QualityPrediction,
+            )
+            predictions.append(QualityPrediction.model_validate(prediction))
+    else:
+        raise ValueError(f"unsupported quality evaluation mode: {mode}")
+    report = evaluate_predictions(suite, predictions, model_mode=mode)
+    if provider is not None:
+        report.model_metadata = {
+            "generation_model": getattr(provider, "generation_model", "unknown"),
+            "review_model": getattr(provider, "review_model", "unknown"),
+            "prompt_version": "research-quality-v1",
+            "usage": dict(getattr(provider, "usage", {})),
+        }
+    return report
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the EduSci research-quality suite")
-    parser.add_argument("--mode", choices=["offline"], default="offline")
+    parser.add_argument("--mode", choices=["offline", "live-qwen"], default="offline")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
     suite = load_quality_suite()
-    predictions = [QualityPrediction.model_validate(case.frozen_prediction) for case in suite.cases]
-    report = evaluate_predictions(suite, predictions, model_mode=args.mode)
+    provider = None
+    if args.mode == "live-qwen":
+        provider = QwenProvider(
+            api_key=os.getenv("DASHSCOPE_API_KEY", ""),
+            base_url=os.getenv(
+                "QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            ),
+            generation_model=os.getenv("QWEN_GENERATION_MODEL", "qwen3.7-plus"),
+            review_model=os.getenv("QWEN_REVIEW_MODEL", "qwen3.7-max"),
+            embedding_model=os.getenv("QWEN_EMBEDDING_MODEL", "text-embedding-v4"),
+            embedding_dimension=int(os.getenv("QWEN_EMBEDDING_DIMENSION", "1024")),
+        )
+    try:
+        report = run_quality_evaluation(suite, mode=args.mode, provider=provider)
+    finally:
+        if provider is not None:
+            provider.client.close()
     payload = report.model_dump(mode="json")
     rendered = json.dumps(payload, ensure_ascii=False, indent=2)
     if args.output:

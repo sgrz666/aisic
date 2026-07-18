@@ -84,4 +84,4 @@ class QualityReport(BaseModel):
     case_count: int
     metrics: QualityMetrics
     gate: QualityGate
-
+    model_metadata: dict = Field(default_factory=dict)

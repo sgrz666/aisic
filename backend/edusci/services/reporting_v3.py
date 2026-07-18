@@ -26,6 +26,19 @@ class _ReportRevision(BaseModel):
     limitation_note: str = Field(min_length=5)
 
 
+class _BlindReviewIssue(BaseModel):
+    code: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    claim_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+
+
+class _BlindReview(BaseModel):
+    status: str = Field(pattern="^(PASS|WARN|BLOCK)$")
+    summary: str = Field(min_length=5)
+    issues: list[_BlindReviewIssue] = Field(default_factory=list)
+
+
 def _confidence(links: list[dict]) -> str:
     supporting_documents = {
         item["document_id"] for item in links if item["stance"] == "supports"
@@ -113,7 +126,13 @@ def regenerate_report_v3(
     by_claim: dict[str, list[dict]] = defaultdict(list)
     for link in links:
         chunk = chunks.get(link.chunk_id)
-        if chunk is None or not chunk.locator.strip() or not chunk.text.strip():
+        if (
+            chunk is None
+            or link.validation_status != "validated"
+            or not chunk.locator.strip()
+            or not link.excerpt.strip()
+            or link.excerpt not in chunk.text
+        ):
             continue
         version = versions[chunk.version_id]
         document = documents[version.document_id]
@@ -122,8 +141,10 @@ def regenerate_report_v3(
             "claim_id": link.claim_id,
             "stance": link.stance,
             "confidence": link.confidence,
+            "entailment_score": link.entailment_score,
+            "validation_status": link.validation_status,
             "locator": chunk.locator,
-            "excerpt": chunk.text,
+            "excerpt": link.excerpt,
             "document_id": document.id,
             "document_title": document.title,
             "source_url": document.canonical_url,
@@ -140,6 +161,9 @@ def regenerate_report_v3(
         supporting = [item["evidence_id"] for item in claim_links if item["stance"] == "supports"]
         counter = [item["evidence_id"] for item in claim_links if item["stance"] == "counter"]
         qualifying = [item["evidence_id"] for item in claim_links if item["stance"] == "qualifies"]
+        supporting_documents = {
+            item["document_id"] for item in claim_links if item["stance"] == "supports"
+        }
         claim_ledger.append(
             {
                 "claim_id": claim_id,
@@ -149,12 +173,34 @@ def regenerate_report_v3(
                 "qualifies": qualifying,
             }
         )
-        if supporting:
+        descriptive_primary = claim.claim_type == "descriptive_fact" and any(
+            documents[item["document_id"]].source_type in {"official", "institutional"}
+            for item in claim_links
+            if item["stance"] == "supports"
+        )
+        if len(supporting_documents) >= 2 or descriptive_primary:
+            confidence_score = min(
+                95,
+                55
+                + 15 * len(supporting_documents)
+                + round(
+                    sum(item["entailment_score"] for item in claim_links)
+                    / max(1, len(claim_links))
+                    * 0.1
+                )
+                - 10 * len(counter),
+            )
             conclusions.append(
                 {
                     "claim_id": claim_id,
                     "statement": claim.statement,
                     "confidence": _confidence(claim_links),
+                    "confidence_score": confidence_score,
+                    "confidence_factors": {
+                        "independent_supporting_documents": len(supporting_documents),
+                        "counter_evidence_count": len(counter),
+                        "validated_evidence_count": len(claim_links),
+                    },
                     "evidence_ids": [item["evidence_id"] for item in claim_links],
                 }
             )
@@ -202,6 +248,8 @@ def regenerate_report_v3(
             else "没有可定位证据支持的结论；报告已限制为方法、证据缺口和研究建议"
         ),
     }
+    if not conclusions and review.get("overall") != "BLOCK":
+        review["overall"] = "WARN"
     review.update(
         {
             "schema_version": 3,
@@ -232,6 +280,7 @@ def regenerate_report_v3(
                         ),
                     },
                 ],
+                schema=_BlindReview,
             )
             review["agent_review"] = agent_review
             revision_round = 0
@@ -287,6 +336,7 @@ def regenerate_report_v3(
                             ),
                         },
                     ],
+                    schema=_BlindReview,
                 )
             review["agent_review"] = agent_review
             review["revision_round"] = revision_round

@@ -168,6 +168,8 @@ class AutonomousRunView(BaseModel):
     model_usage: dict
     stop_reason: str
     degraded_sources: list
+    quality_metrics: dict
+    quality_gate_status: str
 
 
 class DatasetCandidateView(BaseModel):

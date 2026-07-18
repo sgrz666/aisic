@@ -51,11 +51,14 @@ from edusci.memory.models import (
     ReportArtifactRecord,
     ResearchChunkRecord,
     ResearchClaimRecord,
+    ResearchClaimSubquestionRecord,
     ResearchDocumentRecord,
     ResearchDocumentVersionRecord,
     ResearchIterationRecord,
+    ResearchSubquestionRecord,
     TaskRecord,
 )
+from edusci.memory.retrieval import ResearchMemoryIndex
 from edusci.reporting.docx import build_report_docx
 from edusci.services.analysis import run_analysis, save_dataset
 from edusci.services.autonomy import (
@@ -142,11 +145,17 @@ def autonomous_orchestrator(
     provider = request.app.state.model_provider
     deep_engine = None
     if provider is not None and request.app.state.fulltext_fetcher is not None:
+        memory_index = (
+            ResearchMemoryIndex(session, provider)
+            if hasattr(provider, "embed")
+            else None
+        )
         deep_engine = DeepResearchEngine(
             session=session,
             provider=provider,
             search=deep_search,
             fetch_fulltext=request.app.state.fulltext_fetcher.fetch,
+            memory_index=memory_index,
         )
     return AutonomousOrchestrator(
         session=session,
@@ -285,6 +294,8 @@ def autonomous_research_state(
             "model_usage": run.model_usage,
             "stop_reason": run.stop_reason,
             "degraded_sources": run.degraded_sources,
+            "quality_gate_status": run.quality_gate_status,
+            **run.quality_metrics,
         },
         "iterations": [
             {
@@ -319,6 +330,25 @@ def autonomous_evidence_graph(
             select(ResearchClaimRecord).where(ResearchClaimRecord.id.in_(claim_ids))
         )
     )
+    subquestions = list(
+        session.scalars(
+            select(ResearchSubquestionRecord)
+            .where(ResearchSubquestionRecord.run_id == run.id)
+            .order_by(ResearchSubquestionRecord.ordinal)
+        )
+    )
+    bindings = list(
+        session.scalars(
+            select(ResearchClaimSubquestionRecord).where(
+                ResearchClaimSubquestionRecord.claim_id.in_(claim_ids)
+            )
+        )
+    )
+    subquestion_ids_by_claim: dict[str, list[str]] = {
+        claim_id: [] for claim_id in claim_ids
+    }
+    for binding in bindings:
+        subquestion_ids_by_claim[binding.claim_id].append(binding.subquestion_id)
     links = list(
         session.scalars(
             select(ClaimEvidenceLinkRecord).where(
@@ -363,7 +393,11 @@ def autonomous_evidence_graph(
                 "stance": link.stance,
                 "confidence": link.confidence,
                 "locator": chunk.locator,
-                "excerpt": chunk.text,
+                "excerpt": link.excerpt,
+                "validation_status": link.validation_status,
+                "entailment_score": link.entailment_score,
+                "validator_model": link.validator_model,
+                "independent_group": document.canonical_key,
                 "document": {
                     "id": document.id,
                     "title": document.title,
@@ -378,8 +412,19 @@ def autonomous_evidence_graph(
                 "id": claim.id,
                 "statement": claim.statement,
                 "claim_type": claim.claim_type,
+                "subquestion_ids": subquestion_ids_by_claim.get(claim.id, []),
             }
             for claim in claims
+        ],
+        "subquestions": [
+            {
+                "id": item.id,
+                "ordinal": item.ordinal,
+                "question": item.question,
+                "required": item.required,
+                "status": item.status,
+            }
+            for item in subquestions
         ],
         "evidence": evidence,
     }

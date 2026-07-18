@@ -470,6 +470,10 @@ class AutonomousOrchestrator:
         run.model_usage = dict(output.get("model_usage") or {})
         run.stop_reason = str(output.get("stop_reason") or "")
         run.degraded_sources = list(output.get("degraded_sources") or [])
+        run.quality_metrics = dict(output.get("quality_metrics") or {})
+        run.quality_gate_status = str(
+            output.get("quality_gate_status") or "LIMITED"
+        )
         self.session.add(run)
         self.session.commit()
 

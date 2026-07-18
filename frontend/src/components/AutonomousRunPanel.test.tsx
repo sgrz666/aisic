@@ -37,6 +37,13 @@ const gateRun: AutonomousRun = {
   model_usage: { total_tokens: 1200 },
   stop_reason: 'evidence_saturated',
   degraded_sources: [],
+  quality_metrics: {
+    subquestion_coverage: 80,
+    independent_source_coverage: 50,
+    counter_search_coverage: 100,
+    grounding_pass_rate: 100,
+  },
+  quality_gate_status: 'LIMITED',
 }
 
 describe('AutonomousRunPanel', () => {
@@ -61,11 +68,17 @@ describe('AutonomousRunPanel', () => {
         model_usage: { total_tokens: 1200 },
         stop_reason: 'evidence_saturated',
         degraded_sources: [],
+        quality_gate_status: 'LIMITED',
+        subquestion_coverage: 80,
+        independent_source_coverage: 50,
+        counter_search_coverage: 100,
+        grounding_pass_rate: 100,
       },
       iterations: [],
     })
     vi.mocked(api.getAutonomousEvidenceGraph).mockResolvedValue({
-      claims: [{ id: 'claim-1', statement: '干预与较低焦虑相关。', claim_type: 'finding' }],
+      subquestions: [{ id: 'sq-1', ordinal: 0, question: '干预是否降低焦虑？', required: true, status: 'covered' }],
+      claims: [{ id: 'claim-1', statement: '干预与较低焦虑相关。', claim_type: 'finding', subquestion_ids: ['sq-1'] }],
       evidence: [{
         id: 'e-1',
         claim_id: 'claim-1',
@@ -73,6 +86,10 @@ describe('AutonomousRunPanel', () => {
         confidence: 88,
         locator: '第 4 页',
         excerpt: '干预组焦虑得分较低。',
+        validation_status: 'validated',
+        entailment_score: 91,
+        validator_model: 'qwen3.7-plus',
+        independent_group: 'doi:10.1/example',
         document: { id: 'd-1', title: '开放研究', url: 'https://example.edu/paper', license_name: 'CC BY 4.0' },
       }],
     })
@@ -152,11 +169,15 @@ describe('AutonomousRunPanel', () => {
 
     expect(await screen.findByText('已解析全文')).toBeVisible()
     expect(screen.getByText('6')).toBeVisible()
+    expect(screen.getByText('质量门禁')).toBeVisible()
+    expect(screen.getByText('独立来源覆盖')).toBeVisible()
+    expect(screen.getByText('原文核验')).toBeVisible()
 
     await userEvent.click(screen.getByRole('tab', { name: '证据矩阵' }))
     expect(await screen.findByText('干预与较低焦虑相关。')).toBeVisible()
     await userEvent.click(screen.getByText('干预与较低焦虑相关。'))
     expect(await screen.findByText(/第 4 页/)).toBeVisible()
+    expect(screen.getByText('已核验')).toBeVisible()
 
     await userEvent.click(screen.getByRole('tab', { name: '最终报告' }))
     expect(screen.getByRole('link', { name: '下载证据化报告' })).toHaveAttribute(

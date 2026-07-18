@@ -107,6 +107,8 @@ powershell -ExecutionPolicy Bypass -File scripts\stop.ps1
 DASHSCOPE_API_KEY=你的百炼_API_Key
 QWEN_GENERATION_MODEL=qwen3.7-plus
 QWEN_REVIEW_MODEL=qwen3.7-max
+QWEN_EMBEDDING_MODEL=text-embedding-v4
+QWEN_EMBEDDING_DIMENSION=1024
 ENABLE_LIVE_RETRIEVAL=true
 ```
 
@@ -122,6 +124,8 @@ ENABLE_LIVE_RETRIEVAL=true
 - C 只做理论证据综合，不生成统计结果。
 - D 只保留探索性方向，并阻断终稿。
 - 任务失败或取消后可从已完成检查点恢复，不会重复请求已经完成的检索节点。
+- 新解析全文会生成 1024 维向量并进入跨项目研究记忆；召回使用中英文词法与向量 RRF 混合排序。
+- 质量门禁分别显示子问题、独立来源、反证检索和原文核验覆盖；门禁未通过时只生成受限报告。
 
 可选配置：
 
@@ -149,11 +153,14 @@ Windows：
 powershell -ExecutionPolicy Bypass -File scripts\test.ps1
 powershell -ExecutionPolicy Bypass -File scripts\e2e.ps1
 powershell -ExecutionPolicy Bypass -File scripts\demo-seed.ps1
+powershell -ExecutionPolicy Bypass -File scripts\eval-quality.ps1 -Mode Offline
 ```
 
-- `test.ps1`：后端单元/API/工作流测试、前端组件测试和生产构建。
+- `test.ps1`：凭据扫描、后端单元/API/工作流测试、24 案例离线质量评测、前端组件测试和生产构建。
 - `e2e.ps1`：A/B/C/D 四条路径从 Idea 运行到报告复审终点，并用真实 Chromium 验收首页、创建项目和 S1 工作台。
 - `demo-seed.ps1`：写入四个离线演示项目并推进到路径确认页；演示来源是测试夹具，不应用于正式研究结论。
+- `eval-quality.ps1 -Mode Offline`：使用固定快照运行 `research-quality-v1`，不访问网络、不消耗 Token。
+- `eval-quality.ps1 -Mode LiveQwen`：使用 `.env` 中的百炼配置运行 24 案例真实模型评测，结果写入 `artifacts/quality-report.json`。
 
 ## 使用顺序
 
@@ -178,7 +185,7 @@ powershell -ExecutionPolicy Bypass -File scripts\demo-seed.ps1
 - 报告 V2：`/report-regenerations` 重新生成，`/report-artifacts` 查看历史版本；下载接口可传 `artifact_id` 和 `mode=draft|final`
 - 数据来源声明：`PUT /api/v1/datasets/{id}/provenance`，`unknown` 数据必须人工确认，模拟数据不得作为实证 Source
 - 任务：`/api/v1/tasks/{id}`、`/events`、`/cancel`、`/retry`
-- 自治研究：`/api/v1/projects/{id}/autonomous-runs`、`/api/v1/autonomous-runs/{id}`、`/events`、`/cancel`、`/resume`、`/dataset-candidates`
+- 自治研究：`/api/v1/projects/{id}/autonomous-runs`、`/api/v1/autonomous-runs/{id}`、`/events`、`/cancel`、`/resume`、`/dataset-candidates`、`/research-state`、`/evidence-graph`
 - 反馈提案：`/api/v1/projects/{id}/feedback-signals`
 
 OpenAPI 是前后端唯一接口契约，运行后可在 `/docs` 直接试调。
@@ -190,5 +197,6 @@ OpenAPI 是前后端唯一接口契约，运行后可在 `/docs` 直接试调。
 - 单用户项目制，无注册登录；表中已预留 `owner_id`。
 - 问卷只生成和展示，不内置发放、回收与受试者管理。
 - 不执行模型生成代码，不允许自动修改 Prompt、DAG 或安全规则。
-- PostgreSQL 启动时会启用 `vector` 扩展，文档块和长期知识实体已落 1024 维向量字段；当前召回仍以关系表和内容哈希为主，Embedding 生成与向量排序可在第二阶段接入。
+- PostgreSQL 启动时会启用 `vector` 扩展，研究全文片段按内容哈希缓存 1024 维 Embedding；SQLite 使用相同契约和内存余弦回退。
+- `research-quality-v1` 当前为 24 个中英双语草案案例，先执行引用、受限报告和反证检索等结构门禁；人工批准标签后再启用完整分数门禁。
 - 当前为比赛 MVP；生产部署前还需补充认证、配额、审计留存和密钥托管。

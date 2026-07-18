@@ -21,6 +21,13 @@ class QwenStructuredOutputError(ValueError):
     pass
 
 
+class EvidenceVerification(BaseModel):
+    status: Literal["validated", "rejected"]
+    stance: Literal["supports", "counter", "qualifies"]
+    entailment_score: int
+    reason: str
+
+
 class QwenProvider:
     def __init__(
         self,
@@ -28,6 +35,8 @@ class QwenProvider:
         base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
         generation_model: str = "qwen3.7-plus",
         review_model: str = "qwen3.7-max",
+        embedding_model: str = "text-embedding-v4",
+        embedding_dimension: int = 1024,
         client: httpx.Client | None = None,
         retry_backoff_seconds: float = 0.5,
     ) -> None:
@@ -37,6 +46,8 @@ class QwenProvider:
         self.base_url = base_url.rstrip("/")
         self.generation_model = generation_model
         self.review_model = review_model
+        self.embedding_model = embedding_model
+        self.embedding_dimension = embedding_dimension
         self.client = client or httpx.Client(timeout=90)
         self.retry_backoff_seconds = retry_backoff_seconds
         self.usage = {
@@ -87,6 +98,50 @@ class QwenProvider:
             self.request_ids.append(str(request_id))
         return str(data["choices"][0]["message"]["content"])
 
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        payload = {
+            "model": self.embedding_model,
+            "input": texts,
+            "dimensions": self.embedding_dimension,
+        }
+        response: httpx.Response | None = None
+        for attempt in range(3):
+            try:
+                response = self.client.post(
+                    f"{self.base_url}/embeddings",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json=payload,
+                )
+                if response.status_code not in {408, 429} and response.status_code < 500:
+                    response.raise_for_status()
+                    break
+            except httpx.TransportError:
+                if attempt == 2:
+                    raise
+            if attempt == 2:
+                assert response is not None
+                response.raise_for_status()
+            time.sleep(self.retry_backoff_seconds * (2**attempt))
+
+        assert response is not None
+        data = response.json()
+        ordered = sorted(data.get("data") or [], key=lambda item: int(item["index"]))
+        vectors = [[float(value) for value in item["embedding"]] for item in ordered]
+        if len(vectors) != len(texts) or any(
+            len(vector) != self.embedding_dimension for vector in vectors
+        ):
+            raise ValueError("百炼返回的向量数量或向量维度不符合配置")
+        token_count = int((data.get("usage") or {}).get("total_tokens") or 0)
+        self.usage["requests"] += 1
+        self.usage["prompt_tokens"] += token_count
+        self.usage["total_tokens"] += token_count
+        request_id = response.headers.get("x-request-id") or data.get("request_id")
+        if request_id:
+            self.request_ids.append(str(request_id))
+        return vectors
+
     @staticmethod
     def _parse_json(content: str) -> dict:
         stripped = content.strip()
@@ -127,3 +182,29 @@ class QwenProvider:
                     ]
                 )
         raise QwenStructuredOutputError(f"两次修复后仍无法解析结构化输出: {last_error}")
+
+    def verify_evidence(self, *, statement: str, excerpt: str, stance: str) -> dict:
+        return self.complete_json(
+            "extractor",
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是隔离上下文的证据核验器。判断原文是否支持、反对或限定观点；"
+                        "不得使用原文以外的知识，只返回JSON。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "statement": statement,
+                            "excerpt": excerpt,
+                            "proposed_stance": stance,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            schema=EvidenceVerification,
+        )

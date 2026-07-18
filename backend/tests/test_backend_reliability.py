@@ -223,3 +223,4 @@ def test_quality_script_runs_the_offline_evaluation_by_default() -> None:
     assert 'ValidateSet("Offline", "LiveQwen")' in script
     assert "edusci.evaluation" in script
     assert "quality-report.json" in script
+    assert "Get-Content $EnvFile" in script

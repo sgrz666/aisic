@@ -211,6 +211,8 @@ class AutonomousRunRecord(Base):
     model_usage: Mapped[dict] = mapped_column(JSON, default=dict)
     stop_reason: Mapped[str] = mapped_column(String(80), default="")
     degraded_sources: Mapped[list] = mapped_column(JSON, default=list)
+    quality_metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+    quality_gate_status: Mapped[str] = mapped_column(String(24), default="PENDING")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
@@ -351,6 +353,9 @@ class ResearchChunkRecord(Base):
     locator: Mapped[str] = mapped_column(String(200))
     text: Mapped[str] = mapped_column(Text)
     text_hash: Mapped[str] = mapped_column(String(64), index=True)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1024), nullable=True)
+    embedding_model: Mapped[str] = mapped_column(String(100), default="")
+    embedding_dimension: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class ResearchClaimRecord(Base):
@@ -363,6 +368,37 @@ class ResearchClaimRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class ResearchSubquestionRecord(Base):
+    __tablename__ = "research_subquestions"
+    __table_args__ = (
+        UniqueConstraint("run_id", "ordinal", name="uq_run_subquestion_ordinal"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("autonomous_runs.id"), index=True)
+    ordinal: Mapped[int] = mapped_column(Integer)
+    question: Mapped[str] = mapped_column(Text)
+    required: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(24), default="searching")
+
+
+class ResearchClaimSubquestionRecord(Base):
+    __tablename__ = "research_claim_subquestions"
+    __table_args__ = (
+        UniqueConstraint(
+            "subquestion_id", "claim_id", name="uq_subquestion_claim"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    subquestion_id: Mapped[str] = mapped_column(
+        ForeignKey("research_subquestions.id"), index=True
+    )
+    claim_id: Mapped[str] = mapped_column(ForeignKey("research_claims.id"), index=True)
+    relevance_score: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(24), default="candidate")
+
+
 class ClaimEvidenceLinkRecord(Base):
     __tablename__ = "claim_evidence_links"
     __table_args__ = (
@@ -373,8 +409,12 @@ class ClaimEvidenceLinkRecord(Base):
     claim_id: Mapped[str] = mapped_column(ForeignKey("research_claims.id"), index=True)
     chunk_id: Mapped[str] = mapped_column(ForeignKey("research_chunks.id"), index=True)
     stance: Mapped[str] = mapped_column(String(20), index=True)
+    excerpt: Mapped[str] = mapped_column(Text, default="")
     excerpt_hash: Mapped[str] = mapped_column(String(64))
     confidence: Mapped[int] = mapped_column(Integer, default=0)
+    validation_status: Mapped[str] = mapped_column(String(24), default="candidate")
+    entailment_score: Mapped[int] = mapped_column(Integer, default=0)
+    validator_model: Mapped[str] = mapped_column(String(100), default="deterministic")
 
 
 class ProjectEvidenceUseRecord(Base):

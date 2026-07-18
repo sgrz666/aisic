@@ -80,11 +80,22 @@ def test_autonomous_run_executes_deep_research_and_exposes_graph(tmp_path) -> No
         graph = client.get(
             f"/api/v1/autonomous-runs/{ref['run_id']}/evidence-graph"
         ).json()
+        state = client.get(
+            f"/api/v1/autonomous-runs/{ref['run_id']}/research-state"
+        ).json()
 
     assert run["current_iteration"] == 1
     assert run["fulltext_count"] == 1
     assert run["claim_count"] == 1
     assert run["model_usage"]["total_tokens"] == 120
+    assert run["quality_gate_status"] == "LIMITED"
+    assert run["quality_metrics"]["subquestion_coverage"] == 33
+    assert run["quality_metrics"]["independent_source_coverage"] == 0
     assert run["status"] == "awaiting_real_data"
     assert graph["claims"][0]["statement"].startswith("Population change")
+    assert graph["claims"][0]["subquestion_ids"]
     assert graph["evidence"][0]["locator"] == "Results"
+    assert graph["evidence"][0]["excerpt"].startswith("Population change")
+    assert graph["evidence"][0]["validation_status"] == "validated"
+    assert state["metrics"]["quality_gate_status"] == "LIMITED"
+    assert state["metrics"]["counter_search_coverage"] == 100

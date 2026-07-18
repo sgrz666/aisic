@@ -26,6 +26,27 @@ from edusci.autonomy.planning import ResearchPlanner
 from tests.autonomy_fakes import FakeLiteratureAdapter
 
 
+class _StrictBlindReviewProvider:
+    def __init__(self) -> None:
+        self.review_schema_names: list[str] = []
+
+    def complete_json(self, role, messages, schema=None):
+        del messages
+        if role == "synthesis" and schema is None:
+            return {}
+        if role == "review":
+            assert schema is not None
+            self.review_schema_names.append(schema.__name__)
+            return schema.model_validate(
+                {
+                    "status": "PASS",
+                    "summary": "All conclusions remain within the validated evidence.",
+                    "issues": [],
+                }
+            ).model_dump(mode="json")
+        raise AssertionError(f"unexpected role: {role}")
+
+
 def _completed_legacy_project(app, tmp_path: Path):
     with app.state.session_factory() as session:
         project = create_project(
@@ -177,8 +198,11 @@ def test_report_v3_only_promotes_claims_with_located_evidence(tmp_path: Path) ->
                 claim_id=supported.id,
                 chunk_id=chunk.id,
                 stance="supports",
+                excerpt=chunk.text,
                 excerpt_hash=chunk.text_hash,
                 confidence=92,
+                validation_status="validated",
+                entailment_score=92,
             )
             session.add_all(
                 [
@@ -205,17 +229,71 @@ def test_report_v3_only_promotes_claims_with_located_evidence(tmp_path: Path) ->
             report = artifact.report_json
             assert report["schema_version"] == 3
             assert report["research_methodology"]["iterations"] == 2
-            assert report["conclusions"] == [
-                {
-                    "claim_id": supported.id,
-                    "statement": supported.statement,
-                    "confidence": "moderate",
-                    "evidence_ids": [link.id],
-                }
-            ]
-            assert report["restricted"] is False
+            assert report["conclusions"] == []
+            assert report["restricted"] is True
             assert report["evidence_ledger"][0]["locator"] == "第 4 页"
-            assert artifact.review_json["checks"]["claim_grounding"]["status"] == "PASS"
+            assert artifact.review_json["checks"]["claim_grounding"]["status"] == "WARN"
+
+            second_document = ResearchDocumentRecord(
+                canonical_key="doi:10.1/deep-replication",
+                title="Independent replication",
+                source_type="scholarly",
+                canonical_url="https://doi.org/10.1/deep-replication",
+                license_name="CC BY 4.0",
+            )
+            session.add(second_document)
+            session.flush()
+            second_version = ResearchDocumentVersionRecord(
+                document_id=second_document.id,
+                content_hash="e" * 64,
+                mime_type="text/html",
+                storage_path="https://example.edu/replication",
+            )
+            session.add(second_version)
+            session.flush()
+            second_chunk = ResearchChunkRecord(
+                version_id=second_version.id,
+                chunk_index=0,
+                locator="Results",
+                text="Population change affects education resource allocation.",
+                text_hash="f" * 64,
+            )
+            session.add(second_chunk)
+            session.flush()
+            second_link = ClaimEvidenceLinkRecord(
+                claim_id=supported.id,
+                chunk_id=second_chunk.id,
+                stance="supports",
+                excerpt=second_chunk.text,
+                excerpt_hash=second_chunk.text_hash,
+                confidence=88,
+                validation_status="validated",
+                entailment_score=88,
+            )
+            session.add(second_link)
+            session.commit()
+
+            corroborated = regenerate_report_v3(
+                session, project, refresh_evidence=False
+            ).report_json
+
+            assert corroborated["restricted"] is False
+            assert corroborated["conclusions"][0]["claim_id"] == supported.id
+            assert set(corroborated["conclusions"][0]["evidence_ids"]) == {
+                link.id,
+                second_link.id,
+            }
+
+            provider = _StrictBlindReviewProvider()
+            reviewed = regenerate_report_v3(
+                session,
+                project,
+                refresh_evidence=False,
+                model_provider=provider,
+            )
+
+            assert reviewed.review_json["agent_review"]["status"] == "PASS"
+            assert provider.review_schema_names == ["_BlindReview"]
 
 
 def test_report_regeneration_api_and_dataset_provenance(tmp_path: Path) -> None:

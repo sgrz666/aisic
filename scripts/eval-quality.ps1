@@ -10,6 +10,22 @@ $Python = Join-Path $Root "backend\.venv\Scripts\python.exe"
 if (-not (Test-Path $Python)) { throw "Backend virtual environment not found: $Python" }
 if (-not $Output) { $Output = Join-Path $Root "artifacts\quality-report.json" }
 $ResolvedMode = if ($Mode -eq "LiveQwen") { "live-qwen" } else { "offline" }
+if ($Mode -eq "LiveQwen") {
+  $EnvFile = Join-Path $Root ".env"
+  if (Test-Path $EnvFile) {
+    Get-Content $EnvFile | ForEach-Object {
+      $line = $_.Trim()
+      if ($line -and -not $line.StartsWith("#") -and $line.Contains("=")) {
+        $key, $value = $line.Split("=", 2)
+        [Environment]::SetEnvironmentVariable(
+          $key.Trim(),
+          $value.Trim().Trim('"').Trim("'"),
+          "Process"
+        )
+      }
+    }
+  }
+}
 
 Push-Location (Join-Path $Root "backend")
 try {

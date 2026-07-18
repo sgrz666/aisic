@@ -408,14 +408,18 @@ body::before {
 .research-metric-grid > div { padding: 8px 18px; border-right: 1px solid var(--line); }
 .research-metric-grid > div:last-child { border-right: 0; }
 .research-metric-grid .ant-statistic-content { font: 700 30px/1.2 "Songti SC", serif; color: var(--navy-dark); }
-.research-coverage-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; margin-top: 24px; padding-top: 20px; border-top: 1px dashed var(--line); }
+.research-coverage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 28px; margin-top: 24px; padding-top: 20px; border-top: 1px dashed var(--line); }
 .research-coverage-grid span { color: var(--muted); font-size: 11px; letter-spacing: .08em; }
+.research-quality-gate { display: flex; align-items: center; gap: 10px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.research-quality-gate > span { color: var(--ink); font-weight: 700; }
+.research-quality-gate small { color: var(--muted); }
 .research-run-footnote { display: flex; justify-content: space-between; gap: 16px; margin-top: 15px; color: var(--muted); font: 11px monospace; }
 .evidence-matrix { border: 1px solid var(--line); background: rgba(255,253,247,.72); }
 .evidence-matrix .ant-collapse-item { border-bottom-color: var(--line); }
 .evidence-claim { font: 700 16px/1.6 "Songti SC", serif; color: var(--ink); }
 .evidence-count { color: var(--muted); font: 10px monospace; }
 .evidence-stack { display: grid; gap: 12px; }
+.evidence-subquestion { margin: 0; color: var(--muted); font-size: 12px; }
 .evidence-slip { position: relative; padding: 16px 18px 14px; background: #f2eee4; border-left: 3px solid var(--navy); }
 .evidence-slip header, .evidence-slip footer { display: flex; align-items: center; gap: 10px; }
 .evidence-slip header > span:last-child { margin-left: auto; color: var(--vermilion); font: 11px monospace; }
