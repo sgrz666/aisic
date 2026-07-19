@@ -71,7 +71,7 @@ make e2e
 make demo-seed
 ```
 
-前端：<http://127.0.0.1:5173>  
+前端：<http://127.0.0.1:5174>
 OpenAPI：<http://127.0.0.1:8000/docs>
 
 ### 方案二：Windows 本地直跑
@@ -90,6 +90,14 @@ Set-Location ..
 
 powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 ```
+
+前端端口默认是 `5174`。如需切换，在仓库根目录的 `.env` 中修改：
+
+```dotenv
+WEB_PORT=5180
+```
+
+然后执行 `scripts\stop.ps1` 和 `scripts\dev.ps1` 重启；后端 CORS、Vite 与 Docker Compose 会同步使用该端口。也可只对当前 PowerShell 临时设置 `$env:WEB_PORT="5180"`。
 
 停止服务：
 

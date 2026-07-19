@@ -1,6 +1,10 @@
 import { configDefaults, defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
+declare const process: { env: Record<string, string | undefined> }
+
+const webPort = Number.parseInt(process.env.WEB_PORT ?? '5174', 10)
+
 export default defineConfig({
   plugins: [react()],
   build: {
@@ -15,7 +19,8 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: webPort,
+    strictPort: true,
     proxy: {
       '/api': 'http://127.0.0.1:8000',
       '/health': 'http://127.0.0.1:8000',

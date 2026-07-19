@@ -154,9 +154,13 @@ def create_app(
         description="面向教育学实证研究的一体化 AI Scientist MVP",
         lifespan=lifespan,
     )
+    web_port = os.getenv("WEB_PORT", "5174")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=[
+            f"http://localhost:{web_port}",
+            f"http://127.0.0.1:{web_port}",
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

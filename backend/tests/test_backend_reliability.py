@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
 import yaml
 from sqlalchemy import event, text
 
@@ -32,6 +33,27 @@ def make_project(client: TestClient) -> str:
     )
     assert response.status_code == 201
     return response.json()["id"]
+
+
+def test_cors_allows_the_configured_web_port(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WEB_PORT", "5174")
+    app = create_app(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'cors.db').as_posix()}"
+    )
+
+    with TestClient(app) as client:
+        response = client.options(
+            "/health",
+            headers={
+                "Origin": "http://127.0.0.1:5174",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5174"
 
 
 def test_repeated_start_returns_the_active_run_without_duplicate_queue_job(
